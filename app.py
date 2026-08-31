@@ -766,7 +766,7 @@ async function calcularRota(){
             "💰 Valor da corrida: <b>R$ " + data.valor.toFixed(2).replace(".", ",") + "</b><br>" +
             "⚙️ Taxa do app (9%): <b>R$ " + data.taxa.toFixed(2).replace(".", ",") + "</b><br>" +
             "🏍️ Motorista (91%): <b>R$ " + data.ganho.toFixed(2).replace(".", ",") + "</b><br>" +
-            "📍 Destino localizado: " + data.endereco;
+            "📍 Destino localizado: " + data.endereco + "</div>";
 
         document.getElementById("btnSolicitar").disabled = false;
 
