@@ -646,7 +646,7 @@ Nenhuma localização capturada.
 🧮 CALCULAR VALOR
 </button>
 
-<div id="resultado" class="info">
+<div id="resultado" class="info" style="color:#ffffff !important;background:#162334 !important;">
 Digite o destino e toque em <b>CALCULAR VALOR</b>.
 </div>
 
