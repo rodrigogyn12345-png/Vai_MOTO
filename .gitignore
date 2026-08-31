@@ -1,0 +1,7 @@
+*.db
+*.log
+*.pem
+cookies.txt
+__pycache__/
+*.pyc
+app_backup*.py
