@@ -1,264 +1,884 @@
-# -*- coding: utf-8 -*-
-import os, sqlite3, time, math
-from functools import wraps
-from flask import Flask, request, jsonify, session, redirect, url_for, render_template_string, send_file
+from flask import Flask, request, redirect, url_for, session, render_template_string, jsonify
+from pathlib import Path
+import sqlite3
+import time
+import re
+import math
+import json
+from urllib.parse import quote
+from urllib.request import Request, urlopen
+from werkzeug.security import generate_password_hash, check_password_hash
 
-DB='vaimoto.db'; PRECO_KM=2.00; TAXA=9.0; MOTORISTA=91.0; MAX_MOTORISTAS=20
-app=Flask(__name__); app.secret_key=os.environ.get('VAIMOTO_SECRET','vaimoto-local-2026')
+# ============================================================
+# VAIMOTO V10 - PASSAGEIRO + MOTORISTA + GPS + TARIFA
+# ============================================================
+# Tarifa: R$ 1,20/km
+# Taxa administrativa: 8%
+# Motorista: 92%
+# IMPORTANTE: este arquivo usa HTTP local. Abra no celular com
+# http://IP_DO_ANDROID:5000 (nao https://).
+# ============================================================
 
-def db():
- c=sqlite3.connect(DB,timeout=15); c.row_factory=sqlite3.Row; return c
+app = Flask(__name__)
+app.secret_key = "vaimoto-v10-troque-esta-chave"
 
-def init():
- c=db()
- c.execute('''CREATE TABLE IF NOT EXISTS usuarios_vai(id INTEGER PRIMARY KEY AUTOINCREMENT,nome TEXT NOT NULL,whatsapp TEXT UNIQUE NOT NULL,senha TEXT NOT NULL,tipo TEXT NOT NULL,aprovado INTEGER DEFAULT 1,online INTEGER DEFAULT 0,latitude REAL,longitude REAL,last_seen REAL,criado_em REAL)''')
- c.execute('''CREATE TABLE IF NOT EXISTS corridas_vai(id INTEGER PRIMARY KEY AUTOINCREMENT,passageiro_id INTEGER,partida TEXT,destino TEXT,valor REAL,status TEXT DEFAULT 'PENDENTE',motorista_id INTEGER,latitude_partida REAL,longitude_partida REAL,latitude_destino REAL,longitude_destino REAL,distancia_km REAL,preco_km REAL,taxa_admin_percent REAL,taxa_admin REAL,valor_motorista REAL,pagamento TEXT DEFAULT 'DINHEIRO',criada_em REAL,aceita_em REAL,iniciada_em REAL,concluida_em REAL,cancelada_em REAL)''')
- c.execute('''CREATE TABLE IF NOT EXISTS saques_vai(id INTEGER PRIMARY KEY AUTOINCREMENT,motorista_id INTEGER,valor REAL,chave_pix TEXT,status TEXT DEFAULT 'PENDENTE',criado_em REAL,pago_em REAL)''')
- contas=[('Administrador','62993903299','1234','admin',1),('Ricardo','62999999999','1234','motorista',1),('Rodrigo','62988888888','1234','passageiro',1)]
- for n,w,s,t,a in contas:
-  if not c.execute('SELECT id FROM usuarios_vai WHERE whatsapp=?',(w,)).fetchone(): c.execute('INSERT INTO usuarios_vai(nome,whatsapp,senha,tipo,aprovado,criado_em) VALUES(?,?,?,?,?,?)',(n,w,s,t,a,time.time()))
- c.commit(); c.close()
+BASE_DIR = Path(__file__).resolve().parent
+DB = str(BASE_DIR / "vaimoto.db")
 
-def user():
- uid=session.get('uid')
- if not uid:return None
- c=db(); r=c.execute('SELECT * FROM usuarios_vai WHERE id=?',(uid,)).fetchone(); c.close(); return r
+PRECO_KM = 1.20
+TAXA_ADMIN = 0.08
+PERCENTUAL_MOTORISTA = 1.0 - TAXA_ADMIN
+ONLINE_TIMEOUT = 35
+LOCATION_TIMEOUT = 60
+PENDENTE_TIMEOUT = 10 * 60  # 10 minutos sem motorista: corrida pendente expira
+POLL_PASSAGEIRO = 2000
+POLL_MOTORISTA = 1500
+ADMIN_KEY = "vaimoto-admin-1234"  # troque antes de colocar na internet
 
-def need(tipo=None):
- def d(fn):
-  @wraps(fn)
-  def w(*a,**kw):
-   u=user()
-   if not u:return (jsonify(ok=False,erro='Faça login primeiro.'),401) if request.path.startswith('/api/') else redirect(url_for('login'))
-   if tipo and u['tipo']!=tipo:return jsonify(ok=False,erro='Acesso negado.'),403
-   return fn(*a,**kw)
-  return w
- return d
+STATUS_ATIVOS = ("PENDENTE", "ACEITA", "EM_ANDAMENTO")
 
-def hav(a,b,c,d):
- r=6371.0088;p1=math.radians(a);p2=math.radians(c);dp=math.radians(c-a);dl=math.radians(d-b)
- x=math.sin(dp/2)**2+math.cos(p1)*math.cos(p2)*math.sin(dl/2)**2
- return r*2*math.atan2(math.sqrt(x),math.sqrt(1-x))
 
-def vals(km):
- total=round(max(.1,float(km))*PRECO_KM,2); taxa=round(total*TAXA/100,2); mot=round(total-taxa,2); return total,taxa,mot
+def dinheiro(v):
+    return round(float(v or 0), 2)
 
-def online_count():
- c=db();r=c.execute("SELECT COUNT(*) n FROM usuarios_vai WHERE tipo='motorista' AND aprovado=1 AND online=1 AND (last_seen IS NULL OR last_seen>?)",(time.time()-35,)).fetchone()['n'];c.close();return r
 
-CSS='''<style>*{box-sizing:border-box}body{margin:0;background:#050505;color:#fff;font-family:Arial}.wrap{max-width:1050px;width:94%;margin:auto;padding:20px 0 50px}.head{padding:20px 4%;border-bottom:3px solid #ffd400}.logo{font-size:32px;font-weight:900;color:#ffd400}.sub,.muted{color:#aaa}.card,.box,.ride{background:#121212;border:1px solid #333;border-radius:22px;padding:20px;margin:16px 0}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.big{font-size:32px;color:#ffd400;font-weight:900}.pill{background:#222;border-radius:99px;padding:9px 14px}.status{padding:15px;border-radius:14px;text-align:center;font-weight:900;margin:10px 0}.on{background:#073d1b;color:#32ed72}.off{background:#401010;color:#ff5555}.pend{background:#493d00;color:#ffd400}.acc{background:#073b5d;color:#58bdff}.done{background:#124725;color:#72ee9b}input,select{width:100%;padding:15px;margin:7px 0 14px;border-radius:14px;border:1px solid #555;background:#0b0b0b;color:#fff;font-size:17px}button,.btn{display:block;width:100%;padding:15px;margin:8px 0;border:0;border-radius:14px;font-size:17px;font-weight:800;text-align:center;text-decoration:none;cursor:pointer}.yellow{background:#ffd400;color:#000}.green{background:#16a34a;color:#fff}.blue{background:#1976d2;color:#fff}.red{background:#dc2626;color:#fff}.gray{background:#444;color:#fff}.black{background:#000;color:#fff;border:1px solid #555}.top{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}@media(max-width:700px){.grid,.grid3{grid-template-columns:1fr}.logo{font-size:28px}}a{color:inherit}h1,h2,h3{margin-top:0}'''
+def conectar():
+    con = sqlite3.connect(DB, timeout=15)
+    con.row_factory = sqlite3.Row
+    return con
 
-LOGIN=CSS+'''<div class="wrap"><div class="card" style="max-width:500px;margin:50px auto"><div class="logo">🏍️ VAI<span style="color:#fff">MOTO</span></div><h2>🔐 Entrar</h2>{% if erro %}<div class="status off">{{erro}}</div>{% endif %}<form method="post"><input name="whatsapp" placeholder="WhatsApp" required><input name="senha" type="password" placeholder="Senha" required><button class="yellow">ENTRAR</button></form><a class="btn green" href="{{url_for('cadastro')}}">CRIAR CONTA</a><a class="btn gray" href="/">VOLTAR</a></div></div>'''
-CAD=CSS+'''<div class="wrap"><div class="card" style="max-width:600px;margin:30px auto"><div class="logo">🏍️ VAI<span style="color:#fff">MOTO</span></div><h2>📝 Cadastro</h2>{% if erro %}<div class="status off">{{erro}}</div>{% endif %}<form method="post"><input name="nome" placeholder="Nome" required><input name="whatsapp" placeholder="WhatsApp" required><input name="senha" type="password" placeholder="Senha" required><select name="tipo"><option value="passageiro">Passageiro</option><option value="motorista">Motorista</option></select><button class="yellow">CADASTRAR</button></form></div></div>'''
 
-PASS=CSS+'''<div class="head"><div class="wrap" style="padding:0"><div class="top"><div><div class="logo">🏍️ VAI<span style="color:#fff">MOTO</span></div><div class="sub">Área do passageiro</div></div><div class="pill">🟢 <b id="on">{{online}}</b> online</div></div></div></div><div class="wrap"><div class="card"><h1>Olá, {{u['nome']}} 👋</h1><div id="gps" class="status off">📍 GPS aguardando</div><div class="box"><h2>📍 Origem / embarque</h2><button class="blue" onclick="gps()">📍 USAR MINHA LOCALIZAÇÃO</button><div id="coord" class="muted">Nenhuma localização capturada.</div></div><div class="card" style="background:#fff;color:#111"><h2>🚕 Solicitar corrida</h2><input id="partida" placeholder="Origem / endereço de embarque"><input id="destino" placeholder="Digite o endereço de destino"><button id="din" class="green">💵 PAGAR EM DINHEIRO ✓</button><button id="calc" class="blue" onclick="calcular()">🧮 CALCULAR VALOR</button><div id="resultado" class="box" style="display:none;background:#f7f7f7;color:#111"><div id="dist"></div><div id="valor" style="font-size:28px;color:#d99d00;font-weight:900"></div><div id="taxa"></div><div id="mot"></div></div><button id="sol" class="green" onclick="solicitar()" disabled>🏍️ SOLICITAR CORRIDA</button><div id="msg"></div></div></div><div class="card"><h2>📋 Minhas corridas</h2><div id="corridas">Carregando...</div></div></div><script>let lat=null,lon=null,calc=null;const $=x=>document.getElementById(x);function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}function gps(){if(!navigator.geolocation)return alert('GPS não disponível');$('gps').textContent='📍 Obtendo localização...';navigator.geolocation.getCurrentPosition(p=>{lat=p.coords.latitude;lon=p.coords.longitude;$('gps').className='status on';$('gps').textContent='🟢 GPS ativo';$('coord').textContent='Latitude: '+lat.toFixed(6)+' | Longitude: '+lon.toFixed(6);$('partida').value='Minha localização ('+lat.toFixed(6)+', '+lon.toFixed(6)+')';fetch('/api/passageiro/localizacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:lat,longitude:lon})})},()=>{ $('gps').className='status off';$('gps').textContent='❌ Permita o GPS';alert('Permita a localização no navegador.')},{enableHighAccuracy:true,timeout:15000})}async function calcular(){if(lat===null)return alert('Primeiro toque em USAR MINHA LOCALIZAÇÃO.');let destino=$('destino').value.trim();if(!destino)return alert('Digite o destino.');$('calc').disabled=true;$('calc').textContent='🧮 CALCULANDO...';try{let r=await fetch('/api/calcular-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude_partida:lat,longitude_partida:lon,destino})});let d=await r.json();if(!d.ok)return alert(d.erro);calc=d;$('dist').textContent='📏 '+d.distancia_km.toFixed(2).replace('.',',')+' km';$('valor').textContent='R$ '+d.valor.toFixed(2).replace('.',',');$('taxa').textContent='🏢 App 9%: R$ '+d.taxa_admin.toFixed(2).replace('.',',');$('mot').textContent='🏍️ Motorista 91%: R$ '+d.valor_motorista.toFixed(2).replace('.',',');$('resultado').style.display='block';$('sol').disabled=false}catch(e){alert('Erro ao calcular. Verifique a internet.')}finally{$('calc').disabled=false;$('calc').textContent='🧮 CALCULAR VALOR'}}async function solicitar(){if(!calc)return;let partida=$('partida').value.trim(),destino=$('destino').value.trim();if(!partida||!destino)return alert('Preencha origem e destino.');$('sol').disabled=true;$('sol').textContent='📡 CHAMANDO MOTORISTAS...';try{let r=await fetch('/api/solicitar-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({partida,destino,latitude_partida:lat,longitude_partida:lon,latitude_destino:calc.latitude_destino,longitude_destino:calc.longitude_destino,distancia_km:calc.distancia_km,valor:calc.valor})});let d=await r.json();if(!d.ok)return alert(d.erro);$('msg').textContent='💵 Corrida #'+d.corrida.id+' enviada aos motoristas. Pagamento em dinheiro no final.';calc=null;carregar()}finally{$('sol').disabled=false;$('sol').textContent='🏍️ SOLICITAR CORRIDA'}}function st(s){return s==='PENDENTE'?'<div class="status pend">🔎 CHAMANDO MOTORISTA...</div>':s==='ACEITA'?'<div class="status acc">✅ MOTORISTA A CAMINHO</div>':s==='EM_ANDAMENTO'?'<div class="status acc">🏍️ CORRIDA EM ANDAMENTO</div>':s==='CONCLUIDA'?'<div class="status done">🏁 CONCLUÍDA</div>':'<div class="status off">❌ CANCELADA</div>'}async function carregar(){try{let r=await fetch('/api/minhas-corridas'),d=await r.json();$('corridas').innerHTML=(d.corridas||[]).map(c=>'<div class="ride"><b>🚕 Corrida #'+c.id+'</b>'+st(c.status)+'📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km).toFixed(2)+' km<br><b>R$ '+Number(c.valor).toFixed(2)+'</b><br>💵 '+c.pagamento+(c.motorista_nome?'<br>🏍️ '+esc(c.motorista_nome)+' | 📞 '+esc(c.motorista_whatsapp):'')+(c.status==='PENDENTE'||c.status==='ACEITA'?'<button class="red" onclick="cancelar('+c.id+')">❌ CANCELAR CORRIDA</button>':'')+'</div>').join('')||'<div class="box">Nenhuma corrida.</div>'}catch(e){}}async function cancelar(id){if(!confirm('Cancelar corrida?'))return;await fetch('/api/corrida/'+id+'/cancelar',{method:'POST'});carregar()}async function online(){try{$('on').textContent=(await (await fetch('/api/motoristas-online')).json()).online}catch(e){}}carregar();online();setInterval(carregar,3000);setInterval(online,5000)</script>'''
+def coluna_existe(con, tabela, coluna):
+    return any(r["name"] == coluna for r in con.execute(f"PRAGMA table_info({tabela})").fetchall())
 
-MOT=CSS+'''<div class="head"><div class="wrap" style="padding:0"><div class="top"><div><div class="logo">🏍️ VAI<span style="color:#fff">MOTO</span></div><div class="sub">Área do motorista</div></div><a class="btn gray" style="width:auto" href="/logout">SAIR</a></div></div></div><div class="wrap"><div class="card center"><h2>STATUS DO MOTORISTA</h2><div id="status" class="status off">🔴 OFFLINE</div><button id="tog" class="yellow" onclick="toggle()">🟢 FICAR ONLINE</button></div><div class="grid"><div class="box">💰 Ganhos<div id="gan" class="big">R$ 0,00</div></div><div class="box">🏁 Corridas<div id="q" class="big">0</div></div><div class="box">💵 Saldo<div id="saldo" class="big">R$ 0,00</div></div><div class="box">📊 Sua parte<div class="big">91%</div></div></div><div class="card"><h2>📍 GPS</h2><div id="gps" class="status off">🔴 GPS aguardando</div><div id="co" class="muted">Nenhuma localização.</div></div><div class="card"><h2>🏍️ CORRIDAS DISPONÍVEIS</h2><div id="disp">Fique online para receber chamadas.</div></div><div class="card"><h2>📋 MINHAS CORRIDAS</h2><div id="mine">Carregando...</div></div><div class="card"><h2>💸 SOLICITAR SAQUE</h2><input id="sv" type="number" step="0.01" placeholder="Valor"><input id="pix" placeholder="Chave PIX"><button class="green" onclick="saque()">💸 SOLICITAR SAQUE</button></div></div><script>let on=false;function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}function seton(v){on=!!v;document.getElementById('status').className='status '+(on?'on':'off');document.getElementById('status').textContent=on?'🟢 ONLINE':'🔴 OFFLINE';document.getElementById('tog').textContent=on?'🔴 FICAR OFFLINE':'🟢 FICAR ONLINE'}async function toggle(){let r=await fetch('/api/motorista/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({online:!on})});let d=await r.json();if(!d.ok)return alert(d.erro);seton(d.online);if(on)gps()}function gps(){if(!navigator.geolocation)return;navigator.geolocation.watchPosition(p=>{let la=p.coords.latitude,lo=p.coords.longitude;document.getElementById('gps').className='status on';document.getElementById('gps').textContent='🟢 GPS ATIVO';document.getElementById('co').textContent='Latitude: '+la.toFixed(6)+' | Longitude: '+lo.toFixed(6);fetch('/api/motorista/heartbeat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:la,longitude:lo})})},()=>{}, {enableHighAccuracy:true,timeout:15000,maximumAge:5000})}function btn(c){if(c.status==='PENDENTE')return '<button class="green" onclick="aceitar('+c.id+')">✅ ACEITAR CORRIDA</button>';if(c.status==='ACEITA')return '<button class="blue" onclick="iniciar('+c.id+')">🏍️ INICIAR CORRIDA</button>';if(c.status==='EM_ANDAMENTO')return '<button class="green" onclick="concluir('+c.id+')">🏁 CONCLUIR CORRIDA</button>';return ''}async function disponiveis(){try{let d=await (await fetch('/api/corridas-disponiveis')).json();if(!on)return document.getElementById('disp').innerHTML='<div class="box">🔴 Fique online.</div>';document.getElementById('disp').innerHTML=(d.corridas||[]).map(c=>'<div class="ride"><b>🚕 #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km).toFixed(2)+' km<br><b class="big">R$ '+Number(c.valor).toFixed(2)+'</b><br>🏢 App 9% | 🏍️ Você recebe R$ '+Number(c.valor_motorista).toFixed(2)+'<br>💵 DINHEIRO<a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(c.latitude_partida+','+c.longitude_partida)+'">📍 IR PARA EMBARQUE</a>'+btn(c)+'</div>').join('')||'<div class="box">Nenhuma corrida pendente.</div>'}catch(e){}}async function minhas(){try{let d=await (await fetch('/api/motorista/minhas-corridas')).json();document.getElementById('mine').innerHTML=(d.corridas||[]).map(c=>'<div class="ride"><b>#'+c.id+' '+c.status+'</b><br>'+esc(c.partida)+' → '+esc(c.destino)+'<br>🏍️ Seu ganho: R$ '+Number(c.valor_motorista).toFixed(2)+btn(c)+'</div>').join('')||'Nenhuma.'}catch(e){}}async function ganhos(){try{let d=await (await fetch('/api/motorista/ganhos')).json();document.getElementById('gan').textContent='R$ '+Number(d.ganhos_total).toFixed(2);document.getElementById('q').textContent=d.corridas_concluidas;document.getElementById('saldo').textContent='R$ '+Number(d.saldo_disponivel).toFixed(2)}catch(e){}}async function aceitar(id){let d=await (await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'})).json();if(!d.ok)alert(d.erro);disponiveis();minhas()}async function iniciar(id){let d=await (await fetch('/api/corrida/'+id+'/iniciar',{method:'POST'})).json();if(!d.ok)alert(d.erro);minhas()}async function concluir(id){if(!confirm('Confirmar fim da corrida e pagamento em dinheiro?'))return;let d=await (await fetch('/api/corrida/'+id+'/concluir',{method:'POST'})).json();if(!d.ok)alert(d.erro);minhas();ganhos()}async function saque(){let valor=parseFloat(document.getElementById('sv').value),pix=document.getElementById('pix').value.trim();if(!valor||!pix)return alert('Informe valor e PIX');let d=await (await fetch('/api/motorista/saque',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({valor,chave_pix:pix})})).json();alert(d.ok?'Saque solicitado #'+d.saque.id:d.erro);ganhos()}fetch('/api/motorista/me').then(r=>r.json()).then(d=>{if(d.ok)seton(d.motorista.online==1)});disponiveis();minhas();ganhos();setInterval(disponiveis,3000);setInterval(minhas,3000);setInterval(ganhos,5000)</script>'''
 
-ADMIN=CSS+'''<div class="head"><div class="wrap" style="padding:0"><div class="top"><div><div class="logo">🏍️ VAI<span style="color:#fff">MOTO</span></div><div class="sub">Painel administrativo</div></div><a class="btn gray" style="width:auto" href="/logout">SAIR</a></div></div></div><div class="wrap"><div class="grid3"><div class="box">🏍️ Motoristas<div id="m" class="big">0</div></div><div class="box">🟢 Online<div id="o" class="big">0</div></div><div class="box">🚕 Corridas<div id="c" class="big">0</div></div></div><div class="card"><h2>👨‍✈️ Motoristas</h2><div id="mot">...</div></div><div class="card"><h2>🚕 Corridas</h2><div id="rides">...</div></div><div class="card"><h2>💸 Saques</h2><div id="saques">...</div></div></div><script>function esc(x){return String(x??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]))}async function load(){let md=await(await fetch('/api/admin/motoristas')).json();document.getElementById('m').textContent=md.motoristas.length;document.getElementById('o').textContent=md.motoristas.filter(x=>x.online).length;document.getElementById('mot').innerHTML=md.motoristas.map(x=>'<div class="ride"><b>🏍️ '+esc(x.nome)+'</b><br>📞 '+esc(x.whatsapp)+'<br>'+(x.aprovado?'✅ APROVADO':'⏳ PENDENTE')+' | '+(x.online?'🟢 ONLINE':'🔴 OFFLINE')+'<button class="green" onclick="aprovar('+x.id+',1)">✅ APROVAR</button><button class="red" onclick="aprovar('+x.id+',0)">⛔ BLOQUEAR</button><button class="gray" onclick="excluir('+x.id+')">🗑️ EXCLUIR</button></div>').join('')||'Nenhum';let cd=await(await fetch('/api/admin/corridas')).json();document.getElementById('c').textContent=cd.corridas.length;document.getElementById('rides').innerHTML=cd.corridas.map(x=>'<div class="ride"><b>#'+x.id+' '+x.status+'</b><br>👤 '+esc(x.passageiro_nome)+'<br>🏍️ '+esc(x.motorista_nome||'Aguardando')+'<br>'+esc(x.partida)+' → '+esc(x.destino)+'<br>R$ '+Number(x.valor).toFixed(2)+'</div>').join('')||'Nenhuma';let sd=await(await fetch('/api/admin/saques')).json();document.getElementById('saques').innerHTML=sd.saques.map(x=>'<div class="ride"><b>#'+x.id+' '+esc(x.motorista_nome)+'</b><br>R$ '+Number(x.valor).toFixed(2)+' | PIX: '+esc(x.chave_pix)+'<br>'+x.status+(x.status==='PENDENTE'?'<button class="green" onclick="pagar('+x.id+')">✅ MARCAR COMO PAGO</button>':'')+'</div>').join('')||'Nenhum'}async function aprovar(id,a){let d=await(await fetch('/api/admin/motorista/'+id+'/aprovar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({aprovado:a})})).json();if(!d.ok)alert(d.erro);load()}async function excluir(id){if(confirm('Excluir motorista?')){await fetch('/api/admin/motorista/'+id+'/excluir',{method:'POST'});load()}}async function pagar(id){if(confirm('Confirmar pagamento?')){let d=await(await fetch('/api/admin/saque/'+id+'/pagar',{method:'POST'})).json();if(!d.ok)alert(d.erro);load()}}load();setInterval(load,5000)</script>'''
+def inicializar_banco():
+    con = conectar()
+    con.execute("PRAGMA journal_mode=WAL")
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios_vai (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            whatsapp TEXT NOT NULL UNIQUE,
+            senha TEXT NOT NULL,
+            tipo TEXT NOT NULL CHECK(tipo IN ('passageiro','motorista')),
+            online INTEGER NOT NULL DEFAULT 0,
+            last_seen REAL NOT NULL DEFAULT 0,
+            latitude REAL,
+            longitude REAL,
+            location_seen REAL NOT NULL DEFAULT 0,
+            criado_em REAL NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS corridas_vai (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            passageiro_id INTEGER NOT NULL,
+            partida TEXT NOT NULL,
+            destino TEXT NOT NULL,
+            valor REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'PENDENTE',
+            motorista_id INTEGER,
+            latitude_partida REAL,
+            longitude_partida REAL,
+            latitude_destino REAL,
+            longitude_destino REAL,
+            distancia_km REAL,
+            preco_km REAL DEFAULT 1.20,
+            taxa_admin_percent REAL DEFAULT 8.0,
+            taxa_admin REAL DEFAULT 0,
+            valor_motorista REAL DEFAULT 0,
+            criada_em REAL NOT NULL,
+            aceita_em REAL,
+            iniciada_em REAL,
+            concluida_em REAL,
+            cancelada_em REAL
+        )
+    """)
 
-@app.route('/logo.png')
-def logo_png():
- return send_file(os.path.join(os.path.dirname(__file__), 'logo_vai_de_moto.png'), mimetype='image/png')
+    usuarios = [
+        ("online", "INTEGER NOT NULL DEFAULT 0"),
+        ("last_seen", "REAL NOT NULL DEFAULT 0"),
+        ("latitude", "REAL"),
+        ("longitude", "REAL"),
+        ("location_seen", "REAL NOT NULL DEFAULT 0"),
+        ("criado_em", "REAL NOT NULL DEFAULT 0"),
+    ]
+    for col, typ in usuarios:
+        if not coluna_existe(con, "usuarios_vai", col):
+            con.execute(f"ALTER TABLE usuarios_vai ADD COLUMN {col} {typ}")
 
-@app.route('/')
-def index():
- u=user()
- if not u:
-  return render_template_string(CSS+'''
-  <style>
-    html,body{min-height:100%;background:#050505}
-    .splash{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
-      background:radial-gradient(circle at 50% 35%,#2a2500 0%,#0a0a0a 32%,#050505 70%)}
-    .splash-card{width:min(430px,94vw);min-height:760px;display:flex;flex-direction:column;
-      align-items:center;justify-content:center;text-align:center;padding:28px 20px;
-      border:1px solid #2e2e2e;border-radius:34px;background:linear-gradient(180deg,#111,#050505);
-      box-shadow:0 20px 70px rgba(0,0,0,.7)}
-    .splash-logo{width:min(330px,78vw);height:min(330px,78vw);object-fit:contain;border-radius:28px;
-      filter:drop-shadow(0 12px 28px rgba(255,212,0,.16))}
-    .brand{font-size:34px;font-weight:1000;letter-spacing:-1px;margin-top:14px}
-    .brand .y{color:#ffd400}.brand .w{color:#fff}
-    .tag{color:#cfcfcf;font-size:14px;letter-spacing:3px;margin-top:8px}
-    .line{width:150px;height:3px;background:#ffd400;border-radius:99px;margin:22px 0}
-    .benefits{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;width:100%;margin:6px 0 30px}
-    .benefit{font-size:11px;color:#ddd;padding:8px 3px}
-    .benefit b{display:block;color:#ffd400;font-size:20px;margin-bottom:4px}
-    .loading{width:46px;height:46px;border:4px solid #292929;border-top-color:#ffd400;border-radius:50%;
-      animation:spin 1s linear infinite;margin:8px 0 12px}
-    .loadtxt{font-size:12px;color:#aaa;letter-spacing:2px}
-    @keyframes spin{to{transform:rotate(360deg)}}
-    .actions{width:100%;margin-top:22px}.actions .btn{margin:8px 0}
-    .small{font-size:11px;color:#777;margin-top:18px}
-    @media(max-height:760px){.splash-card{min-height:650px}.splash-logo{width:250px;height:250px}}
-  </style>
-  <div class="splash">
-    <div class="splash-card">
-      <img class="splash-logo" src="/logo.png" alt="VAI_DE_MOTO">
-      <div class="brand"><span class="w">VAI_</span><span class="y">DE_MOTO</span></div>
-      <div class="tag">SEU DESTINO, NOSSA MISSÃO</div>
-      <div class="line"></div>
-      <div class="benefits">
-        <div class="benefit"><b>📍</b>Corridas<br>rápidas</div>
-        <div class="benefit"><b>🛡️</b>Segurança<br>sempre</div>
-        <div class="benefit"><b>💰</b>Preços<br>justos</div>
-      </div>
-      <div class="loading"></div>
-      <div class="loadtxt">CARREGANDO...</div>
-      <div class="actions">
-        <a class="btn yellow" href="/login">🔐 ENTRAR</a>
-        <a class="btn black" href="/cadastro">📝 CRIAR CONTA</a>
-      </div>
-      <div class="small">R$ 2,00/km • App 9% • Motorista 91%</div>
-    </div>
+    corridas = [
+        ("motorista_id", "INTEGER"),
+        ("latitude_partida", "REAL"),
+        ("longitude_partida", "REAL"),
+        ("latitude_destino", "REAL"),
+        ("longitude_destino", "REAL"),
+        ("distancia_km", "REAL"),
+        ("preco_km", "REAL DEFAULT 1.20"),
+        ("taxa_admin_percent", "REAL DEFAULT 8.0"),
+        ("taxa_admin", "REAL DEFAULT 0"),
+        ("valor_motorista", "REAL DEFAULT 0"),
+        ("aceita_em", "REAL"),
+        ("iniciada_em", "REAL"),
+        ("concluida_em", "REAL"),
+        ("cancelada_em", "REAL"),
+    ]
+    for col, typ in corridas:
+        if not coluna_existe(con, "corridas_vai", col):
+            con.execute(f"ALTER TABLE corridas_vai ADD COLUMN {col} {typ}")
+
+    # Corridas antigas: conserva o valor e calcula a divisão administrativa.
+    con.execute("""
+        UPDATE corridas_vai
+        SET preco_km=COALESCE(preco_km, 1.20),
+            taxa_admin_percent=COALESCE(taxa_admin_percent, 8.0),
+            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.08, 2)),
+            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.92, 2))
+    """)
+    con.commit()
+    con.close()
+
+
+def marcar_motoristas_expirados():
+    limite = time.time() - ONLINE_TIMEOUT
+    con = conectar()
+    con.execute("""
+        UPDATE usuarios_vai
+        SET online=0, latitude=NULL, longitude=NULL, location_seen=0
+        WHERE tipo='motorista' AND online=1 AND last_seen < ?
+    """, (limite,))
+    con.commit()
+    con.close()
+
+
+def expirar_corridas_antigas():
+    """Remove chamadas antigas da fila de motoristas.
+
+    Uma corrida PENDENTE que ficou mais de PENDENTE_TIMEOUT sem ser aceita
+    vira CANCELADA para não continuar aparecendo como chamada disponível.
+    """
+    limite = time.time() - PENDENTE_TIMEOUT
+    con = conectar()
+    con.execute("""
+        UPDATE corridas_vai
+        SET status='CANCELADA', cancelada_em=?
+        WHERE status='PENDENTE' AND criada_em < ?
+    """, (time.time(), limite))
+    con.commit()
+    con.close()
+
+
+def contar_motoristas_online():
+    marcar_motoristas_expirados()
+    expirar_corridas_antigas()
+    con = conectar()
+    n = con.execute("SELECT COUNT(*) total FROM usuarios_vai WHERE tipo='motorista' AND online=1").fetchone()["total"]
+    con.close()
+    return n
+
+
+def usuario_logado():
+    uid = session.get("usuario_id")
+    if not uid:
+        return None
+    con = conectar()
+    u = con.execute("SELECT * FROM usuarios_vai WHERE id=?", (uid,)).fetchone()
+    con.close()
+    return u
+
+
+def haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0088
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dp = math.radians(lat2 - lat1)
+    dl = math.radians(lon2 - lon1)
+    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def geocodificar(endereco):
+    """Busca coordenadas do destino usando Nominatim/OpenStreetMap."""
+    url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + quote(endereco)
+    req = Request(url, headers={"User-Agent": "VaiMoto/10.0 local-app"})
+    with urlopen(req, timeout=8) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not data:
+        return None
+    return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("display_name", endereco)
+
+
+def calcular_rota_osrm(lat1, lon1, lat2, lon2):
+    """Distancia por ruas usando OSRM. Retorna km ou None."""
+    url = (
+        "https://router.project-osrm.org/route/v1/driving/"
+        f"{lon1},{lat1};{lon2},{lat2}?overview=false"
+    )
+    req = Request(url, headers={"User-Agent": "VaiMoto/10.0 local-app"})
+    with urlopen(req, timeout=10) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if data.get("code") != "Ok" or not data.get("routes"):
+        return None
+    return float(data["routes"][0]["distance"]) / 1000.0
+
+
+def rota_destino(lat1, lon1, destino):
+    geo = geocodificar(destino)
+    if not geo:
+        return None
+    lat2, lon2, nome = geo
+    try:
+        distancia = calcular_rota_osrm(lat1, lon1, lat2, lon2)
+        fonte = "rota por ruas"
+    except Exception:
+        distancia = None
+        fonte = "distância aproximada"
+    if distancia is None:
+        distancia = haversine_km(lat1, lon1, lat2, lon2)
+    return {
+        "latitude_destino": lat2,
+        "longitude_destino": lon2,
+        "destino_encontrado": nome,
+        "distancia_km": max(0.01, distancia),
+        "fonte_distancia": fonte,
+    }
+
+
+def calcular_valores(distancia_km):
+    total = dinheiro(distancia_km * PRECO_KM)
+    taxa = dinheiro(total * TAXA_ADMIN)
+    motorista = dinheiro(total - taxa)
+    return total, taxa, motorista
+
+
+def sessao_tipo(tipo):
+    u = usuario_logado()
+    return u and u["tipo"] == tipo
+
+
+# ============================================================
+# CSS
+# ============================================================
+CSS = """
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f1f3f6;font-family:Arial,sans-serif;color:#111}
+.card{width:min(94%,760px);margin:18px auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 8px 25px rgba(0,0,0,.10)}
+h1{margin:0 0 8px;font-size:30px}h2{font-size:23px;margin:12px 0}p{font-size:17px}
+input,select{width:100%;padding:15px;margin:6px 0 12px;border:1px solid #ccc;border-radius:14px;font-size:17px;background:#fff}
+button,.btn{display:block;width:100%;padding:15px;margin:9px 0;border:0;border-radius:14px;font-size:18px;text-align:center;text-decoration:none;cursor:pointer}
+.green{background:#159447;color:#fff}.black{background:#111;color:#fff}.gray{background:#666;color:#fff}.red{background:#c62828;color:#fff}.blue{background:#1769aa;color:#fff}.orange{background:#e67e22;color:#fff}
+.status{padding:15px;border-radius:14px;margin:12px 0;font-size:19px;font-weight:bold;text-align:center}.online{background:#dff7e6;color:#08752e}.offline{background:#eee;color:#555}
+.box,.ride{border:1px solid #ddd;border-radius:16px;padding:15px;margin:12px 0;background:#fff}.ride{border-width:2px}.gps{background:#eef6ff;border-color:#cfe5ff}
+.small{font-size:14px;color:#666}.badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#eee;font-size:12px;font-weight:bold}
+.row{display:flex;gap:8px}.row>*{flex:1}.price{font-size:28px;font-weight:bold;margin:8px 0}.maplink{color:#1769aa;font-weight:bold;text-decoration:none}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.top .badge{margin-top:5px}
+.money{background:#f8fff9;border:1px solid #c9e8d1;border-radius:14px;padding:12px}.warn{background:#fff7e6;border:1px solid #ffd27a;border-radius:14px;padding:12px}
+@media(max-width:520px){.card{width:96%;padding:15px}h1{font-size:26px}.row{display:block}}
+</style>
+"""
+
+
+# ============================================================
+# HOME / CADASTRO / LOGIN
+# ============================================================
+HOME = CSS + """
+<div class="card">
+  <h1>🏍️ VaiMoto V10</h1>
+  <p>Solicite sua corrida ou trabalhe como motorista.</p>
+  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 8%</div>
+  <a class="btn black" href="{{ url_for('login') }}">Entrar</a>
+  <a class="btn green" href="{{ url_for('cadastro') }}">Criar cadastro</a>
+</div>
+"""
+
+CADASTRO = CSS + """
+<div class="card">
+  <h1>📝 Cadastro</h1>
+  {% if erro %}<div class="box" style="color:#b00020">❌ {{ erro }}</div>{% endif %}
+  <form method="post">
+    <input name="nome" placeholder="Nome completo" value="{{ dados.get('nome','') }}" autocomplete="name" required>
+    <input name="whatsapp" placeholder="WhatsApp com DDD" value="{{ dados.get('whatsapp','') }}" inputmode="tel" autocomplete="tel" required>
+    <input name="senha" type="password" placeholder="Senha (mínimo 4 caracteres)" minlength="4" required>
+    <select name="tipo" required>
+      <option value="passageiro" {% if dados.get('tipo')=='passageiro' %}selected{% endif %}>Passageiro</option>
+      <option value="motorista" {% if dados.get('tipo')=='motorista' %}selected{% endif %}>Motoboy/Mototaxista</option>
+    </select>
+    <button class="green" type="submit">Cadastrar</button>
+  </form>
+  <a class="btn gray" href="{{ url_for('index') }}">Voltar</a>
+</div>
+"""
+
+LOGIN = CSS + """
+<div class="card">
+  <h1>🔐 Entrar</h1>
+  {% if erro %}<div class="box" style="color:#b00020">❌ {{ erro }}</div>{% endif %}
+  <form method="post">
+    <input name="whatsapp" placeholder="WhatsApp" inputmode="tel" required>
+    <input name="senha" type="password" placeholder="Senha" required>
+    <button class="black" type="submit">Entrar</button>
+  </form>
+  <a class="btn gray" href="{{ url_for('index') }}">Voltar</a>
+</div>
+"""
+
+
+# ============================================================
+# PASSAGEIRO
+# ============================================================
+PASSAGEIRO = CSS + """
+<div class="card">
+  <div class="top">
+    <div><div class="small">🏍️ VAIMOTO</div><h1>Olá, {{ usuario['nome'] }} 👋</h1></div>
+    <div class="badge">🟢 <span id="onlineCount">{{ online }}</span> online</div>
   </div>
-  <script>setTimeout(function(){window.location.href='/login';},3200);</script>
-  ''')
- return redirect('/admin' if u['tipo']=='admin' else '/motorista' if u['tipo']=='motorista' else '/passageiro')
-@app.route('/login',methods=['GET','POST'])
-def login():
- erro=None
- if request.method=='POST':
-  c=db();u=c.execute('SELECT * FROM usuarios_vai WHERE whatsapp=? AND senha=?',(request.form.get('whatsapp','').strip(),request.form.get('senha',''))).fetchone();c.close()
-  if not u:erro='WhatsApp ou senha incorretos.'
-  elif u['tipo']=='motorista' and not u['aprovado']:erro='Motorista ainda não aprovado.'
-  else:session['uid']=u['id'];return redirect('/')
- return render_template_string(LOGIN,erro=erro)
-@app.route('/cadastro',methods=['GET','POST'])
+
+  <div id="gpsStatus" class="status offline">📍 GPS aguardando</div>
+
+  <div class="box gps">
+    <b>📍 Origem / embarque</b>
+    <p class="small">Use o GPS para pegar sua posição atual.</p>
+    <button class="blue" type="button" onclick="capturarGPS()">📍 USAR MINHA LOCALIZAÇÃO</button>
+    <div id="gpsText" class="small">Nenhuma localização capturada.</div>
+  </div>
+
+  <div class="box">
+    <h2>🚕 Solicitar corrida</h2>
+    <label><b>Origem</b></label>
+    <input id="partida" placeholder="Origem / endereço de embarque" required>
+    <label><b>Destino</b></label>
+    <input id="destino" placeholder="Digite o endereço de destino" autocomplete="street-address" required>
+    <input type="hidden" id="latitude_partida">
+    <input type="hidden" id="longitude_partida">
+
+    <button class="blue" id="btnCalcular" type="button" onclick="calcularCorrida()">🧮 CALCULAR VALOR</button>
+    <div id="calculo" style="display:none" class="money">
+      <div>📏 Distância: <b id="distancia">0,00 km</b></div>
+      <div class="price" id="valor">R$ 0,00</div>
+      <div>🏢 Taxa do app (8%): <b id="taxa">R$ 0,00</b></div>
+      <div>🏍️ Motorista recebe (92%): <b id="motoristaValor">R$ 0,00</b></div>
+      <div class="small" id="fonteRota"></div>
+    </div>
+    <div style="margin:12px 0">
+<label><b>💳 Forma de pagamento</b></label>
+<select id="formaPagamento" required>
+<option value="DINHEIRO">💵 Dinheiro</option>
+<option value="PIX">🟢 Pix</option>
+<option value="CARTAO">💳 Cartão</option>
+</select>
+</div>
+<button class="green" id="btnSolicitar" type="button" onclick="solicitarCorrida()" disabled>🏍️ SOLICITAR CORRIDA</button>
+    <div id="msgCorrida" class="small"></div>
+  </div>
+
+  <div class="box" id="chamadaBox">
+    <h2>📲 Chamada do motorista</h2>
+    <div id="chamadaStatus" class="status offline">Nenhuma corrida ativa.</div>
+    <div id="motoristaAtivo" class="small">Depois que um motorista aceitar, o telefone e a localização aparecem aqui.</div>
+  </div>
+
+  <div class="box" id="mapBox" style="display:none">
+    <b>🗺️ Acompanhar motorista</b>
+    <div id="mapInfo" class="small"></div>
+    <a id="mapMotorista" class="btn blue" target="_blank" rel="noopener">📍 VER MOTORISTA NO MAPA</a>
+  </div>
+
+  <h2>📋 Minhas corridas</h2>
+  <div id="corridas"><div class="box">Carregando...</div></div>
+  <a class="btn gray" href="{{ url_for('logout') }}">Sair</a>
+</div>
+
+<script>
+let gpsLat=null,gpsLon=null,gpsWatch=null;
+let calculoAtual=null;
+let ultimaNotificacao={};
+let audioLiberado=false;
+
+function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function som(){
+  if(!audioLiberado)return;
+  try{const C=AudioContext||webkitAudioContext,ctx=new C(),o=ctx.createOscillator(),g=ctx.createGain();
+  o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ctx.destination);o.start();
+  setTimeout(()=>o.frequency.value=1175,130);setTimeout(()=>{o.stop();ctx.close()},320);}catch(e){}
+}
+function liberarAudio(){audioLiberado=true}
+document.addEventListener('click',liberarAudio,{once:true});
+
+function mostrarGPS(lat,lon,acc){
+  gpsLat=lat;gpsLon=lon;
+  document.getElementById('latitude_partida').value=lat;
+  document.getElementById('longitude_partida').value=lon;
+  document.getElementById('partida').value='Minha localização atual';
+  document.getElementById('gpsStatus').className='status online';
+  document.getElementById('gpsStatus').textContent='🟢 GPS ATIVO';
+  document.getElementById('gpsText').textContent='📍 '+lat.toFixed(6)+', '+lon.toFixed(6)+' • precisão ~'+Math.round(acc||0)+' m';
+  fetch('/api/passageiro/localizacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:lat,longitude:lon})}).catch(()=>{});
+}
+function iniciarGPS(){
+  if(!navigator.geolocation){alert('Este navegador não oferece GPS.');return;}
+  if(gpsWatch!==null)return;
+  gpsWatch=navigator.geolocation.watchPosition(p=>mostrarGPS(p.coords.latitude,p.coords.longitude,p.coords.accuracy),e=>{
+    document.getElementById('gpsStatus').className='status offline';
+    document.getElementById('gpsStatus').textContent='⚠️ Permita a localização do navegador';
+  },{enableHighAccuracy:true,maximumAge:5000,timeout:15000});
+}
+function capturarGPS(){
+  if(!navigator.geolocation){alert('GPS não disponível.');return;}
+  document.getElementById('gpsStatus').textContent='📍 Obtendo GPS...';
+  navigator.geolocation.getCurrentPosition(p=>{mostrarGPS(p.coords.latitude,p.coords.longitude,p.coords.accuracy);iniciarGPS()},e=>alert('Não consegui acessar o GPS. Ative a localização e permita o acesso do navegador.'),{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+}
+
+async function calcularCorrida(){
+  const destino=document.getElementById('destino').value.trim();
+  if(gpsLat===null||gpsLon===null){alert('Primeiro toque em USAR MINHA LOCALIZAÇÃO.');return;}
+  if(!destino){alert('Digite o destino.');return;}
+  const b=document.getElementById('btnCalcular');b.disabled=true;b.textContent='🧮 CALCULANDO ROTA...';
+  try{
+    const r=await fetch('/api/calcular-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude_partida:gpsLat,longitude_partida:gpsLon,destino:destino})});
+    const d=await r.json();
+    if(!d.ok){alert(d.erro||'Não foi possível calcular a rota.');return;}
+    calculoAtual=d;
+    document.getElementById('distancia').textContent=Number(d.distancia_km).toFixed(2).replace('.',',')+' km';
+    document.getElementById('valor').textContent=br(d.valor);
+    document.getElementById('taxa').textContent=br(d.taxa_admin);
+    document.getElementById('motoristaValor').textContent=br(d.valor_motorista);
+    document.getElementById('fonteRota').textContent=d.fonte_distancia==='rota por ruas'?'🗺️ Valor calculado pela rota de carro/moto.':'📏 Valor aproximado pela distância GPS.';
+    document.getElementById('calculo').style.display='block';
+    document.getElementById('btnSolicitar').disabled=false;
+    document.getElementById('msgCorrida').textContent='Destino localizado: '+d.destino_encontrado;
+  }catch(e){alert('Falha ao calcular. Verifique sua internet e tente novamente.');}
+  finally{b.disabled=false;b.textContent='🧮 CALCULAR VALOR';}
+}
+
+async function solicitarCorrida(){
+  if(!calculoAtual)return;
+  const partida=document.getElementById('partida').value.trim();
+  const destino=document.getElementById('destino').value.trim();
+  if(!partida||!destino){alert('Preencha origem e destino.');return;}
+  const b=document.getElementById('btnSolicitar');b.disabled=true;b.textContent='📲 CHAMANDO MOTORISTAS...';
+  try{
+    const r=await fetch('/api/solicitar-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      partida,destino,latitude_partida:gpsLat,longitude_partida:gpsLon,
+      latitude_destino:calculoAtual.latitude_destino,longitude_destino:calculoAtual.longitude_destino,
+      distancia_km:calculoAtual.distancia_km,forma_pagamento:document.getElementById('formaPagamento').value,valor:calculoAtual.valor,
+      taxa_admin:calculoAtual.taxa_admin,valor_motorista:calculoAtual.valor_motorista
+    })});
+    const d=await r.json();
+    if(!d.ok){alert(d.erro||'Não foi possível solicitar.');return;}
+    som();
+    document.getElementById('msgCorrida').textContent='📲 Corrida #'+d.corrida.id+' enviada aos motoristas online.';
+    calculoAtual=null;document.getElementById('btnSolicitar').disabled=true;
+    carregarCorridas();
+  }catch(e){alert('Falha de conexão com o servidor.');}
+  finally{b.disabled=false;b.textContent='🏍️ SOLICITAR CORRIDA';}
+}
+
+function renderCorridas(lista){
+  const area=document.getElementById('corridas');
+  if(!lista.length){area.innerHTML='<div class="box">Você ainda não solicitou nenhuma corrida.</div>';return;}
+  area.innerHTML='';
+  lista.forEach(c=>{
+    let s='';
+    if(c.status==='PENDENTE')s='<div class="status online">🔎 CHAMANDO MOTORISTA...</div>';
+    if(c.status==='ACEITA')s='<div class="status online">✅ MOTORISTA ACEITOU</div>';
+    if(c.status==='EM_ANDAMENTO')s='<div class="status online">🏍️ CORRIDA EM ANDAMENTO</div>';
+    if(c.status==='CONCLUIDA')s='<div class="status online">🏁 CORRIDA CONCLUÍDA</div>';
+    if(c.status==='CANCELADA')s='<div class="status offline">❌ CORRIDA CANCELADA</div>';
+    let motorista='';
+    if(c.motorista_nome){motorista='<div class="box"><b>🏍️ '+esc(c.motorista_nome)+'</b><br>📞 '+esc(c.motorista_whatsapp||'')+'<a class="btn green" href="tel:'+esc(c.motorista_whatsapp||'')+'">📞 LIGAR PARA MOTORISTA</a>';
+      if(c.motorista_lat!=null&&c.motorista_lon!=null){motorista+='<a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+c.motorista_lat+','+c.motorista_lon+'">📍 VER MOTORISTA NO MAPA</a>';}
+      motorista+='</div>';
+    }
+    let cancel='';if(c.status==='PENDENTE'||c.status==='ACEITA')cancel='<button class="red" onclick="cancelarCorrida('+c.id+')">❌ CANCELAR CORRIDA</button>';
+    const el=document.createElement('div');el.className='ride';
+    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Motorista 92%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
+    area.appendChild(el);
+    const old=ultimaNotificacao[c.id];
+    if(old && old!==c.status && c.status==='ACEITA'){som();if(navigator.vibrate)navigator.vibrate([200,100,300]);}
+    ultimaNotificacao[c.id]=c.status;
+    if(c.status==='ACEITA'||c.status==='EM_ANDAMENTO'){
+      document.getElementById('chamadaStatus').className='status online';
+      document.getElementById('chamadaStatus').textContent=c.status==='ACEITA'?'✅ MOTORISTA A CAMINHO':'🏍️ CORRIDA EM ANDAMENTO';
+      document.getElementById('motoristaAtivo').textContent=c.motorista_nome?'Motorista: '+c.motorista_nome:'Motorista encontrado.';
+      if(c.motorista_lat!=null&&c.motorista_lon!=null){document.getElementById('mapBox').style.display='block';document.getElementById('mapInfo').textContent='GPS do motorista: '+Number(c.motorista_lat).toFixed(6)+', '+Number(c.motorista_lon).toFixed(6);document.getElementById('mapMotorista').href='https://www.google.com/maps/search/?api=1&query='+c.motorista_lat+','+c.motorista_lon;}
+    }
+  });
+}
+async function carregarCorridas(){
+  try{const r=await fetch('/api/minhas-corridas');if(!r.ok)return;const d=await r.json();renderCorridas(d.corridas||[]);}catch(e){}
+}
+async function cancelarCorrida(id){
+  if(!confirm('Cancelar esta corrida?'))return;
+  const r=await fetch('/api/corrida/'+id+'/cancelar',{method:'POST'});const d=await r.json();
+  if(!d.ok){alert(d.erro||'Não foi possível cancelar.');return;}som();carregarCorridas();
+}
+async function atualizarOnline(){try{const r=await fetch('/api/motoristas-online');const d=await r.json();document.getElementById('onlineCount').textContent=d.online}catch(e){}}
+
+iniciarGPS();carregarCorridas();atualizarOnline();
+setInterval(carregarCorridas,{{ poll }});setInterval(atualizarOnline,5000);
+</script>
+"""
+
+
+# ============================================================
+# MOTORISTA
+# ============================================================
+MOTORISTA = CSS + """
+<div class="card">
+  <div class="top"><div><div class="small">🏍️ VAIMOTO</div><h1>{{ usuario['nome'] }}</h1></div><div class="badge">👤 MOTORISTA</div></div>
+  <div id="onlineBox" class="status {% if usuario['online'] %}online{% else %}offline{% endif %}">{% if usuario['online'] %}🟢 MOTORISTA ONLINE{% else %}⚪ MOTORISTA OFFLINE{% endif %}</div>
+  <button id="toggleBtn" class="{% if usuario['online'] %}red{% else %}green{% endif %}" onclick="alternarOnline()">{% if usuario['online'] %}FICAR OFFLINE{% else %}FICAR ONLINE{% endif %}</button>
+
+  <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>
+
+  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 92% • app fica com 8%</div>
+
+  <h2>🔔 Corridas disponíveis</h2>
+  <div id="corridas"><div class="box">Carregando...</div></div>
+
+  <h2>🏍️ Minha corrida</h2>
+  <div id="minhaCorrida"><div class="box">Nenhuma corrida aceita.</div></div>
+
+  <p class="small">Deixe esta página aberta para continuar online. O GPS depende da permissão de localização do navegador.</p>
+  <a class="btn gray" href="{{ url_for('logout') }}">Sair</a>
+</div>
+<script>
+let online={{ 'true' if usuario['online'] else 'false' }};let gpsWatch=null;let ultimoId=null;let ultimoStatus=null;let audioLiberado=false;
+function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function som(){if(!audioLiberado)return;try{const C=AudioContext||webkitAudioContext,ctx=new C(),o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=700;g.gain.value=.1;o.connect(g);g.connect(ctx.destination);o.start();setTimeout(()=>o.frequency.value=1100,150);setTimeout(()=>{o.stop();ctx.close()},450)}catch(e){}}
+document.addEventListener('click',()=>{audioLiberado=true},{once:true});
+function gps(){if(!online||!navigator.geolocation)return;if(gpsWatch!==null)return;gpsWatch=navigator.geolocation.watchPosition(p=>{document.getElementById('gpsText').textContent='🟢 GPS ativo: '+p.coords.latitude.toFixed(6)+', '+p.coords.longitude.toFixed(6)+' • precisão ~'+Math.round(p.coords.accuracy||0)+' m';fetch('/api/motorista/localizacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:p.coords.latitude,longitude:p.coords.longitude})}).catch(()=>{})},()=>{document.getElementById('gpsText').textContent='⚠️ Permita a localização do navegador.'},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
+function pararGPS(){if(gpsWatch!==null){navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null;}document.getElementById('gpsText').textContent='GPS desligado.';}
+async function alternarOnline(){const novo=!online;const b=document.getElementById('toggleBtn');b.disabled=true;try{const r=await fetch('/api/motorista/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({online:novo})});const d=await r.json();if(!d.ok){alert(d.erro||'Erro');return;}online=!!d.online;const box=document.getElementById('onlineBox');box.className='status '+(online?'online':'offline');box.textContent=online?'🟢 MOTORISTA ONLINE':'⚪ MOTORISTA OFFLINE';b.className=online?'red':'green';b.textContent=online?'FICAR OFFLINE':'FICAR ONLINE';if(online)gps();else pararGPS();carregarCorridas();}catch(e){alert('Falha de conexão.')}finally{b.disabled=false;}}
+async function carregarCorridas(){
+  if(!online){document.getElementById('corridas').innerHTML='<div class="box">Fique online para receber chamadas.</div>';return;}
+  try{const r=await fetch('/api/corridas-disponiveis');if(!r.ok)return;const d=await r.json();const area=document.getElementById('corridas');
+    if(!d.corridas.length){area.innerHTML='<div class="box">Nenhuma corrida pendente no momento.</div>';return;}
+    area.innerHTML='';d.corridas.forEach(c=>{if(ultimoId!==c.id){som();if(navigator.vibrate)navigator.vibrate([300,150,300]);ultimoId=c.id;}
+      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
+  }catch(e){}}
+async function aceitar(id){const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Essa corrida já foi aceita.');carregarCorridas();return;}som();carregarCorridas();carregarMinhaCorrida();}
+async function carregarMinhaCorrida(){try{const r=await fetch('/api/minha-corrida-motorista');if(!r.ok)return;const d=await r.json();const c=d.corrida;const area=document.getElementById('minhaCorrida');if(!c){area.innerHTML='<div class="box">Nenhuma corrida aceita.</div>';return;}if(ultimoStatus&&ultimoStatus!==c.status)som();ultimoStatus=c.status;
+ let botoes='';if(c.status==='ACEITA')botoes+='<button class="green" onclick="iniciar('+c.id+')">🏍️ INICIAR CORRIDA</button>';if(c.status==='EM_ANDAMENTO')botoes+='<button class="black" onclick="concluir('+c.id+')">✅ CONCLUIR CORRIDA</button>';
+ area.innerHTML='<div class="ride"><b>🚕 Corrida #'+c.id+'</b><span class="badge">'+esc(c.status)+'</span><br>👤 '+esc(c.passageiro_nome)+'<br>📞 '+esc(c.passageiro_whatsapp)+'<br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="money">🏍️ Seu ganho: <b>'+br(c.valor_motorista)+'</b><br>🏢 Taxa do app: '+br(c.taxa_admin)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+(c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida))+'">📍 ABRIR EMBARQUE</a><a class="btn orange" href="tel:'+esc(c.passageiro_whatsapp)+'">📞 LIGAR PARA PASSAGEIRO</a>'+botoes+'</div>';
+ }catch(e){}}
+async function iniciar(id){const r=await fetch('/api/corrida/'+id+'/iniciar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível iniciar.');return;}som();carregarMinhaCorrida();carregarCorridas();}
+async function concluir(id){if(!confirm('Concluir esta corrida?'))return;const r=await fetch('/api/corrida/'+id+'/concluir',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível concluir.');return;}som();carregarMinhaCorrida();carregarCorridas();}
+if(online)gps();carregarCorridas();carregarMinhaCorrida();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida()}},{{ poll }});
+</script>
+"""
+
+
+# ============================================================
+# ROTAS BÁSICAS
+# ============================================================
+@app.route("/")
+def index():
+    return render_template_string(HOME)
+
+
+@app.route("/cadastro", methods=["GET", "POST"])
 def cadastro():
- erro=None
- if request.method=='POST':
-  n=request.form.get('nome','').strip();w=request.form.get('whatsapp','').strip();s=request.form.get('senha','');t=request.form.get('tipo','passageiro')
-  if not n or not w or not s:erro='Preencha todos os campos.'
-  else:
-   try:
-    c=db();a=0 if t=='motorista' else 1;c.execute('INSERT INTO usuarios_vai(nome,whatsapp,senha,tipo,aprovado,criado_em) VALUES(?,?,?,?,?,?)',(n,w,s,t,a,time.time()));c.commit();c.close();return redirect('/login')
-   except sqlite3.IntegrityError:erro='WhatsApp já cadastrado.'
- return render_template_string(CAD,erro=erro)
-@app.route('/logout')
+    dados={"nome":"","whatsapp":"","tipo":"passageiro"}
+    erro=""
+    if request.method=="POST":
+        dados["nome"]=request.form.get("nome","").strip()
+        dados["whatsapp"]=re.sub(r"\D","",request.form.get("whatsapp","").strip())
+        dados["tipo"]=request.form.get("tipo","passageiro").strip()
+        senha=request.form.get("senha","")
+        if len(dados["nome"])<2: erro="Digite seu nome completo."
+        elif len(dados["whatsapp"])<10: erro="Digite um WhatsApp válido com DDD."
+        elif len(senha)<4: erro="A senha precisa ter pelo menos 4 caracteres."
+        elif dados["tipo"] not in ("passageiro","motorista"): erro="Tipo de conta inválido."
+        else:
+            con=conectar()
+            try:
+                if con.execute("SELECT id FROM usuarios_vai WHERE whatsapp=?",(dados["whatsapp"],)).fetchone():
+                    erro="Esse WhatsApp já está cadastrado."
+                else:
+                    cur=con.execute("""
+                        INSERT INTO usuarios_vai(nome,whatsapp,senha,tipo,online,last_seen,latitude,longitude,location_seen,criado_em)
+                        VALUES(?,?,?,?,0,0,NULL,NULL,0,?)
+                    """,(dados["nome"],dados["whatsapp"],generate_password_hash(senha),dados["tipo"],time.time()))
+                    con.commit();session["usuario_id"]=cur.lastrowid
+                    return redirect(url_for("motorista" if dados["tipo"]=="motorista" else "passageiro"))
+            except sqlite3.IntegrityError: con.rollback();erro="Esse WhatsApp já está cadastrado."
+            finally: con.close()
+    return render_template_string(CADASTRO,dados=dados,erro=erro)
+
+
+@app.route("/login", methods=["GET","POST"])
+def login():
+    erro=""
+    if request.method=="POST":
+        whatsapp=re.sub(r"\D","",request.form.get("whatsapp","").strip())
+        senha=request.form.get("senha","")
+        con=conectar();u=con.execute("SELECT * FROM usuarios_vai WHERE whatsapp=?",(whatsapp,)).fetchone();con.close()
+        if u and check_password_hash(u["senha"],senha):
+            session["usuario_id"]=u["id"];return redirect(url_for("motorista" if u["tipo"]=="motorista" else "passageiro"))
+        erro="WhatsApp ou senha incorretos."
+    return render_template_string(LOGIN,erro=erro)
+
+
+@app.route("/logout")
 def logout():
- u=user()
- if u and u['tipo']=='motorista':
-  c=db();c.execute('UPDATE usuarios_vai SET online=0 WHERE id=?',(u['id'],));c.commit();c.close()
- session.clear();return redirect('/')
-@app.route('/passageiro')
-@need('passageiro')
-def passageiro():return render_template_string(PASS,u=user(),online=online_count())
-@app.route('/motorista')
-@need('motorista')
-def motorista():return render_template_string(MOT,u=user())
-@app.route('/admin')
-@need('admin')
-def admin():return render_template_string(ADMIN)
+    uid=session.get("usuario_id")
+    if uid:
+        con=conectar();con.execute("UPDATE usuarios_vai SET online=0,last_seen=0,latitude=NULL,longitude=NULL,location_seen=0 WHERE id=? AND tipo='motorista'",(uid,));con.commit();con.close()
+    session.clear();return redirect(url_for("index"))
 
-@app.route('/api/motoristas-online')
-def api_online():return jsonify(online=online_count())
-@app.route('/api/passageiro/localizacao',methods=['POST'])
-@need('passageiro')
-def ploc():
- d=request.get_json() or {};c=db();c.execute('UPDATE usuarios_vai SET latitude=?,longitude=? WHERE id=?',(d.get('latitude'),d.get('longitude'),user()['id']));c.commit();c.close();return jsonify(ok=True)
-@app.route('/api/calcular-corrida',methods=['POST'])
-@need('passageiro')
-def calcular():
- d=request.get_json() or {};dest=str(d.get('destino','')).strip()
- try:la=float(d['latitude_partida']);lo=float(d['longitude_partida'])
- except:return jsonify(ok=False,erro='GPS de origem inválido.'),400
- if not dest:return jsonify(ok=False,erro='Digite o destino.'),400
- # Teste local: se destino vier como coordenadas, usa GPS diretamente.
- try:
-  p=[x.strip() for x in dest.replace(';',',').split(',')];la2=float(p[0]);lo2=float(p[1]);
-  if not(-90<=la2<=90 and -180<=lo2<=180):raise ValueError()
- except:
-  return jsonify(ok=False,erro='Para calcular agora, informe o destino como latitude,longitude (ex.: -16.680,-49.250). Depois podemos ligar o mapa/geocodificação.'),400
- km=max(.1,hav(la,lo,la2,lo2));total,taxa,mot=vals(km)
- return jsonify(ok=True,latitude_destino=la2,longitude_destino=lo2,distancia_km=round(km,2),valor=total,taxa_admin=taxa,valor_motorista=mot,fonte_distancia='distância GPS aproximada')
-@app.route('/api/solicitar-corrida',methods=['POST'])
-@need('passageiro')
-def solicitar():
- u=user();d=request.get_json() or {}
- try:la=float(d['latitude_partida']);lo=float(d['longitude_partida']);la2=float(d['latitude_destino']);lo2=float(d['longitude_destino']);km=float(d['distancia_km'])
- except:return jsonify(ok=False,erro='Dados da corrida inválidos.'),400
- if not d.get('partida') or not d.get('destino'):return jsonify(ok=False,erro='Origem e destino obrigatórios.'),400
- total,taxa,mot=vals(km);c=db()
- if c.execute("SELECT id FROM corridas_vai WHERE passageiro_id=? AND status IN ('PENDENTE','ACEITA','EM_ANDAMENTO')",(u['id'],)).fetchone():c.close();return jsonify(ok=False,erro='Você já possui uma corrida ativa.'),409
- cur=c.execute('''INSERT INTO corridas_vai(passageiro_id,partida,destino,valor,status,motorista_id,latitude_partida,longitude_partida,latitude_destino,longitude_destino,distancia_km,preco_km,taxa_admin_percent,taxa_admin,valor_motorista,pagamento,criada_em) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',(u['id'],d['partida'],d['destino'],total,'PENDENTE',None,la,lo,la2,lo2,km,PRECO_KM,TAXA,taxa,mot,'DINHEIRO',time.time()));rid=cur.lastrowid;c.commit();r=c.execute('SELECT * FROM corridas_vai WHERE id=?',(rid,)).fetchone();c.close();return jsonify(ok=True,corrida=dict(r))
-@app.route('/api/minhas-corridas')
-@need('passageiro')
-def minhas_p():
- c=db();r=c.execute('''SELECT x.*,m.nome motorista_nome,m.whatsapp motorista_whatsapp FROM corridas_vai x LEFT JOIN usuarios_vai m ON m.id=x.motorista_id WHERE x.passageiro_id=? ORDER BY x.id DESC LIMIT 30''',(user()['id'],)).fetchall();c.close();return jsonify(corridas=[dict(x) for x in r])
-@app.route('/api/corrida/<int:i>/cancelar',methods=['POST'])
-@need('passageiro')
-def cancelar(i):
- c=db();cur=c.execute("UPDATE corridas_vai SET status='CANCELADA',cancelada_em=? WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','ACEITA')",(time.time(),i,user()['id']));c.commit();c.close();return jsonify(ok=cur.rowcount==1)
-@app.route('/api/motorista/me')
-@need('motorista')
-def mme():return jsonify(ok=True,motorista=dict(user()))
-@app.route('/api/motorista/status',methods=['POST'])
-@need('motorista')
-def mstatus():
- d=request.get_json() or {};on=1 if d.get('online') else 0
- if on and not user()['aprovado']:return jsonify(ok=False,erro='Motorista não aprovado.'),403
- c=db();c.execute('UPDATE usuarios_vai SET online=?,last_seen=? WHERE id=?',(on,time.time(),user()['id']));c.commit();c.close();return jsonify(ok=True,online=on)
-@app.route('/api/motorista/heartbeat',methods=['POST'])
-@need('motorista')
-def hb():
- d=request.get_json() or {};c=db();c.execute('UPDATE usuarios_vai SET latitude=?,longitude=?,last_seen=? WHERE id=? AND online=1',(d.get('latitude'),d.get('longitude'),time.time(),user()['id']));c.commit();c.close();return jsonify(ok=True)
-@app.route('/api/corridas-disponiveis')
-@need('motorista')
-def disponiveis():
- c=db();r=c.execute("SELECT id,partida,destino,valor,latitude_partida,longitude_partida,latitude_destino,longitude_destino,distancia_km,taxa_admin_percent,valor_motorista,pagamento FROM corridas_vai WHERE status='PENDENTE' ORDER BY id").fetchall();c.close();return jsonify(corridas=[dict(x) for x in r])
-@app.route('/api/corrida/<int:i>/aceitar',methods=['POST'])
-@need('motorista')
-def aceitar(i):
- u=user()
- if not u['aprovado'] or not u['online']:return jsonify(ok=False,erro='Fique ONLINE para aceitar.'),403
- c=db();cur=c.execute("UPDATE corridas_vai SET status='ACEITA',motorista_id=?,aceita_em=? WHERE id=? AND status='PENDENTE'",(u['id'],time.time(),i));c.commit();c.close();return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount else 'Corrida já aceita por outro motorista.')
-@app.route('/api/corrida/<int:i>/iniciar',methods=['POST'])
-@need('motorista')
-def iniciar(i):
- c=db();cur=c.execute("UPDATE corridas_vai SET status='EM_ANDAMENTO',iniciada_em=? WHERE id=? AND motorista_id=? AND status='ACEITA'",(time.time(),i,user()['id']));c.commit();c.close();return jsonify(ok=cur.rowcount==1)
-@app.route('/api/corrida/<int:i>/concluir',methods=['POST'])
-@need('motorista')
-def concluir(i):
- c=db();cur=c.execute("UPDATE corridas_vai SET status='CONCLUIDA',concluida_em=? WHERE id=? AND motorista_id=? AND status='EM_ANDAMENTO'",(time.time(),i,user()['id']));c.commit();c.close();return jsonify(ok=cur.rowcount==1)
-@app.route('/api/motorista/minhas-corridas')
-@need('motorista')
-def minhas_m():
- c=db();r=c.execute('SELECT * FROM corridas_vai WHERE motorista_id=? ORDER BY id DESC LIMIT 50',(user()['id'],)).fetchall();c.close();return jsonify(corridas=[dict(x) for x in r])
-@app.route('/api/motorista/ganhos')
-@need('motorista')
-def ganhos():
- c=db();g=c.execute("SELECT COUNT(*) q,COALESCE(SUM(valor_motorista),0) total FROM corridas_vai WHERE motorista_id=? AND status='CONCLUIDA'",(user()['id'],)).fetchone()['total'];q=c.execute("SELECT COUNT(*) q FROM corridas_vai WHERE motorista_id=? AND status='CONCLUIDA'",(user()['id'],)).fetchone()['q'];s=c.execute("SELECT COALESCE(SUM(valor),0) x FROM saques_vai WHERE motorista_id=? AND status IN ('PENDENTE','APROVADO','PAGO')",(user()['id'],)).fetchone()['x'];c.close();return jsonify(ganhos_total=round(g,2),corridas_concluidas=q,saldo_disponivel=round(max(0,g-s),2))
-@app.route('/api/motorista/saque',methods=['POST'])
-@need('motorista')
-def saque():
- d=request.get_json() or {};v=round(float(d.get('valor',0)),2);pix=str(d.get('chave_pix','')).strip();c=db();g=c.execute("SELECT COALESCE(SUM(valor_motorista),0) x FROM corridas_vai WHERE motorista_id=? AND status='CONCLUIDA'",(user()['id'],)).fetchone()['x'];s=c.execute("SELECT COALESCE(SUM(valor),0) x FROM saques_vai WHERE motorista_id=? AND status IN ('PENDENTE','APROVADO','PAGO')",(user()['id'],)).fetchone()['x'];saldo=g-s
- if v<=0 or not pix or v>saldo:c.close();return jsonify(ok=False,erro=f'Saldo insuficiente. Disponível R$ {max(0,saldo):.2f}'),400
- cur=c.execute("INSERT INTO saques_vai(motorista_id,valor,chave_pix,status,criado_em) VALUES(?,?,?,'PENDENTE',?)",(user()['id'],v,pix,time.time()));c.commit();r=c.execute('SELECT * FROM saques_vai WHERE id=?',(cur.lastrowid,)).fetchone();c.close();return jsonify(ok=True,saque=dict(r))
-@app.route('/api/admin/motoristas')
-@need('admin')
-def am():
- c=db();r=c.execute("SELECT id,nome,whatsapp,aprovado,online FROM usuarios_vai WHERE tipo='motorista' ORDER BY id DESC").fetchall();c.close();return jsonify(motoristas=[dict(x) for x in r])
-@app.route('/api/admin/motorista/<int:i>/aprovar',methods=['POST'])
-@need('admin')
-def aa(i):
- a=1 if (request.get_json() or {}).get('aprovado') else 0;c=db();cur=c.execute("UPDATE usuarios_vai SET aprovado=? WHERE id=? AND tipo='motorista'",(a,i));c.commit();c.close();return jsonify(ok=cur.rowcount==1)
-@app.route('/api/admin/motorista/<int:i>/excluir',methods=['POST'])
-@need('admin')
-def ax(i):
- c=db();c.execute("UPDATE corridas_vai SET motorista_id=NULL WHERE motorista_id=? AND status='PENDENTE'",(i,));c.execute("DELETE FROM saques_vai WHERE motorista_id=? AND status='PENDENTE'",(i,));c.execute("DELETE FROM usuarios_vai WHERE id=? AND tipo='motorista'",(i,));c.commit();c.close();return jsonify(ok=True)
-@app.route('/api/admin/corridas')
-@need('admin')
-def ac():
- c=db();r=c.execute('''SELECT x.*,p.nome passageiro_nome,m.nome motorista_nome FROM corridas_vai x JOIN usuarios_vai p ON p.id=x.passageiro_id LEFT JOIN usuarios_vai m ON m.id=x.motorista_id ORDER BY x.id DESC LIMIT 100''').fetchall();c.close();return jsonify(corridas=[dict(x) for x in r])
-@app.route('/api/admin/saques')
-@need('admin')
-def asq():
- c=db();r=c.execute('SELECT s.*,u.nome motorista_nome FROM saques_vai s JOIN usuarios_vai u ON u.id=s.motorista_id ORDER BY s.id DESC').fetchall();c.close();return jsonify(saques=[dict(x) for x in r])
-@app.route('/api/admin/saque/<int:i>/pagar',methods=['POST'])
-@need('admin')
-def ap(i):
- c=db();cur=c.execute("UPDATE saques_vai SET status='PAGO',pago_em=? WHERE id=? AND status='PENDENTE'",(time.time(),i));c.commit();c.close();return jsonify(ok=cur.rowcount==1)
 
-init()
-if __name__=='__main__':
- print('🏍️ VAI_DE_MOTO INICIADO');print('Tarifa: R$ 2,00/km | App: 9% | Motorista: 91%');print('Admin: 62993903299 / 1234');print('Motorista: 62999999999 / 1234');print('Passageiro: 62988888888 / 1234');app.run(host='0.0.0.0',port=5000,debug=False)
+# ============================================================
+# PASSAGEIRO
+# ============================================================
+@app.route("/passageiro")
+def passageiro():
+    u=usuario_logado()
+    if not u:return redirect(url_for("login"))
+    if u["tipo"]!="passageiro":return "Acesso permitido somente para passageiros.",403
+    return render_template_string(PASSAGEIRO,usuario=u,online=contar_motoristas_online(),poll=POLL_PASSAGEIRO)
+
+
+@app.route("/api/calcular-corrida", methods=["POST"])
+def api_calcular_corrida():
+    u=usuario_logado()
+    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Faça login como passageiro."),401
+    d=request.get_json(silent=True) or {}
+    try:
+        lat=float(d.get("latitude_partida"));lon=float(d.get("longitude_partida"))
+        if not (-90<=lat<=90 and -180<=lon<=180):raise ValueError
+    except (TypeError,ValueError):return jsonify(ok=False,erro="GPS da origem inválido. Ative sua localização."),400
+    destino=str(d.get("destino","")).strip()
+    if len(destino)<3:return jsonify(ok=False,erro="Digite um destino válido."),400
+    try:
+        rota=rota_destino(lat,lon,destino)
+    except Exception:
+        return jsonify(ok=False,erro="Não consegui localizar o destino. Confira o endereço e sua internet."),400
+    if not rota:return jsonify(ok=False,erro="Destino não encontrado. Digite endereço completo, com bairro/cidade."),400
+    total,taxa,mot=calcular_valores(rota["distancia_km"])
+    rota.update(ok=True,valor=total,taxa_admin=taxa,valor_motorista=mot,preco_km=PRECO_KM,taxa_admin_percent=TAXA_ADMIN*100)
+    return jsonify(rota)
+
+
+@app.route("/api/solicitar-corrida", methods=["POST"])
+def api_solicitar_corrida():
+    u=usuario_logado()
+    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Faça login como passageiro."),401
+    d=request.get_json(silent=True) or {}
+    try:
+        lat=float(d.get("latitude_partida"));lon=float(d.get("longitude_partida"));lat2=float(d.get("latitude_destino"));lon2=float(d.get("longitude_destino"));dist=float(d.get("distancia_km"));valor=float(d.get("valor"))
+    except (TypeError,ValueError):return jsonify(ok=False,erro="Dados da corrida inválidos."),400
+    if not(-90<=lat<=90 and -180<=lon<=180 and -90<=lat2<=90 and -180<=lon2<=180):return jsonify(ok=False,erro="Coordenadas inválidas."),400
+    if dist<=0 or valor<=0:return jsonify(ok=False,erro="Distância ou valor inválido."),400
+    partida=str(d.get("partida","")).strip();destino=str(d.get("destino","")).strip()
+    if not partida or not destino:return jsonify(ok=False,erro="Origem e destino são obrigatórios."),400
+    # Recalcula no servidor para o passageiro não poder alterar a tarifa pelo navegador.
+    total,taxa,mot=calcular_valores(dist)
+    con=conectar()
+    try:
+        # Evita duas corridas simultâneas do mesmo passageiro.
+        ativa=con.execute("SELECT id FROM corridas_vai WHERE passageiro_id=? AND status IN ('PENDENTE','ACEITA','EM_ANDAMENTO') LIMIT 1",(u["id"],)).fetchone()
+        if ativa:return jsonify(ok=False,erro="Você já possui uma corrida ativa."),409
+        cur=con.execute("""
+INSERT INTO corridas_vai(
+passageiro_id,partida,destino,valor,status,motorista_id,
+latitude_partida,longitude_partida,latitude_destino,longitude_destino,
+distancia_km,preco_km,taxa_admin_percent,taxa_admin,valor_motorista,criada_em
+)
+VALUES(?,?,?,?,'PENDENTE',NULL,?,?,?,?,?,?,?,?,?,?)
+""",(
+u["id"],partida,destino,total,
+lat,lon,lat2,lon2,dist,PRECO_KM,
+TAXA_ADMIN*100,taxa,mot,time.time()
+))
+        
+        con.commit()
+        rid=cur.lastrowid
+        row=con.execute("SELECT * FROM corridas_vai WHERE id=?",(rid,)).fetchone()
+        return jsonify(ok=True,corrida=dict(row))
+        
+    finally:
+        con.close()
+ 
+
+
+@app.route("/api/passageiro/localizacao",methods=["POST"])
+def api_passageiro_localizacao():
+    u=usuario_logado()
+    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Acesso negado."),401
+    d=request.get_json(silent=True) or {}
+    try:lat=float(d.get("latitude"));lon=float(d.get("longitude"));assert -90<=lat<=90 and -180<=lon<=180
+    except (TypeError,ValueError,AssertionError):return jsonify(ok=False,erro="Coordenadas inválidas."),400
+    con=conectar();row=con.execute("SELECT id FROM corridas_vai WHERE passageiro_id=? AND status IN ('PENDENTE','ACEITA','EM_ANDAMENTO') ORDER BY id DESC LIMIT 1",(u["id"],)).fetchone()
+    if row:con.execute("UPDATE corridas_vai SET latitude_partida=?,longitude_partida=? WHERE id=?",(lat,lon,row["id"]));con.commit()
+    con.close();return jsonify(ok=True,latitude=lat,longitude=lon)
+
+
+@app.route("/api/minhas-corridas")
+def api_minhas_corridas():
+    u=usuario_logado()
+    if not u:return jsonify(corridas=[]),401
+    con=conectar();rows=con.execute("""
+      SELECT c.*,m.nome motorista_nome,m.whatsapp motorista_whatsapp,m.latitude motorista_lat,m.longitude motorista_lon,m.location_seen motorista_location_seen
+      FROM corridas_vai c LEFT JOIN usuarios_vai m ON m.id=c.motorista_id
+      WHERE c.passageiro_id=? ORDER BY c.id DESC
+    """,(u["id"],)).fetchall();con.close()
+    out=[]
+    for r in rows:
+        d=dict(r)
+        if d.get("motorista_location_seen") and time.time()-d["motorista_location_seen"]>LOCATION_TIMEOUT:d["motorista_lat"]=None;d["motorista_lon"]=None
+        out.append(d)
+    return jsonify(corridas=out)
+
+
+@app.route("/api/corrida/<int:corrida_id>/cancelar",methods=["POST"])
+def cancelar_corrida(corrida_id):
+    u=usuario_logado()
+    if not u:return jsonify(ok=False,erro="Faça login novamente."),401
+    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='CANCELADA',cancelada_em=? WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','ACEITA')",(time.time(),corrida_id,u["id"]));con.commit();con.close()
+    return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "Esta corrida não pode mais ser cancelada.")
+
+
+# ============================================================
+# MOTORISTA
+# ============================================================
+@app.route("/motorista")
+def motorista():
+    u=usuario_logado()
+    if not u:return redirect(url_for("login"))
+    if u["tipo"]!="motorista":return "Acesso permitido somente para motoristas.",403
+    marcar_motoristas_expirados();u=usuario_logado()
+    return render_template_string(MOTORISTA,usuario=u,poll=POLL_MOTORISTA)
+
+
+@app.route("/api/motorista/status",methods=["POST"])
+def api_motorista_status():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
+    d=request.get_json(silent=True) or {};online=1 if d.get("online") else 0
+    con=conectar();now=time.time()
+    if online:con.execute("UPDATE usuarios_vai SET online=1,last_seen=? WHERE id=?",(now,u["id"]))
+    else:con.execute("UPDATE usuarios_vai SET online=0,last_seen=0,latitude=NULL,longitude=NULL,location_seen=0 WHERE id=?",(u["id"],))
+    con.commit();con.close();return jsonify(ok=True,online=bool(online),online_total=contar_motoristas_online())
+
+
+@app.route("/api/motorista/heartbeat",methods=["POST"])
+def api_motorista_heartbeat():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False),401
+    con=conectar();con.execute("UPDATE usuarios_vai SET last_seen=? WHERE id=? AND online=1",(time.time(),u["id"]));con.commit();con.close();return jsonify(ok=True)
+
+
+@app.route("/api/motorista/localizacao",methods=["POST"])
+def api_motorista_localizacao():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
+    d=request.get_json(silent=True) or {}
+    try:lat=float(d.get("latitude"));lon=float(d.get("longitude"));assert -90<=lat<=90 and -180<=lon<=180
+    except (TypeError,ValueError,AssertionError):return jsonify(ok=False,erro="Coordenadas inválidas."),400
+    now=time.time();con=conectar();r=con.execute("UPDATE usuarios_vai SET latitude=?,longitude=?,location_seen=?,last_seen=? WHERE id=? AND online=1",(lat,lon,now,now,u["id"]));con.commit();con.close()
+    return jsonify(ok=r.rowcount==1,latitude=lat,longitude=lon)
+
+
+@app.route("/api/motoristas-online")
+def api_motoristas_online():return jsonify(online=contar_motoristas_online())
+
+
+@app.route("/api/corridas-disponiveis")
+def api_corridas_disponiveis():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(corridas=[]),401
+    marcar_motoristas_expirados();expirar_corridas_antigas();con=conectar();rows=con.execute("""
+      SELECT c.id,c.partida,c.destino,c.valor,c.latitude_partida,c.longitude_partida,c.latitude_destino,c.longitude_destino,c.distancia_km,c.taxa_admin,c.valor_motorista,c.criada_em
+      FROM corridas_vai c WHERE c.status='PENDENTE' ORDER BY c.id ASC
+    """).fetchall();con.close();return jsonify(corridas=[dict(r) for r in rows])
+
+
+@app.route("/api/minha-corrida-motorista")
+def api_minha_corrida_motorista():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(corrida=None),401
+    con=conectar();r=con.execute("""
+      SELECT c.*,p.nome passageiro_nome,p.whatsapp passageiro_whatsapp
+      FROM corridas_vai c JOIN usuarios_vai p ON p.id=c.passageiro_id
+      WHERE c.motorista_id=? AND c.status IN ('ACEITA','EM_ANDAMENTO') ORDER BY c.id DESC LIMIT 1
+    """,(u["id"],)).fetchone();con.close();return jsonify(corrida=dict(r) if r else None)
+
+
+@app.route("/api/corrida/<int:corrida_id>/aceitar",methods=["POST"])
+def aceitar_corrida(corrida_id):
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
+    marcar_motoristas_expirados();con=conectar();mot=con.execute("SELECT online FROM usuarios_vai WHERE id=? AND tipo='motorista'",(u["id"],)).fetchone()
+    if not mot or not mot["online"]:con.close();return jsonify(ok=False,erro="Você precisa estar online para aceitar."),400
+    # Um motorista não pega duas corridas ao mesmo tempo.
+    ativa=con.execute("SELECT id FROM corridas_vai WHERE motorista_id=? AND status IN ('ACEITA','EM_ANDAMENTO') LIMIT 1",(u["id"],)).fetchone()
+    if ativa:con.close();return jsonify(ok=False,erro="Você já possui uma corrida ativa."),409
+    cur=con.execute("UPDATE corridas_vai SET status='ACEITA',motorista_id=?,aceita_em=? WHERE id=? AND status='PENDENTE' AND motorista_id IS NULL",(u["id"],time.time(),corrida_id))
+    if cur.rowcount!=1:con.rollback();con.close();return jsonify(ok=False,erro="Essa corrida já foi aceita por outro motorista."),409
+    con.commit();r=con.execute("SELECT * FROM corridas_vai WHERE id=?",(corrida_id,)).fetchone();con.close();return jsonify(ok=True,corrida=dict(r))
+
+
+@app.route("/api/corrida/<int:corrida_id>/iniciar",methods=["POST"])
+def iniciar_corrida(corrida_id):
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
+    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='EM_ANDAMENTO',iniciada_em=? WHERE id=? AND motorista_id=? AND status='ACEITA'",(time.time(),corrida_id,u["id"]));con.commit();con.close();return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "A corrida não está disponível para iniciar.")
+
+
+@app.route("/api/corrida/<int:corrida_id>/concluir",methods=["POST"])
+def concluir_corrida(corrida_id):
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
+    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='CONCLUIDA',concluida_em=? WHERE id=? AND motorista_id=? AND status='EM_ANDAMENTO'",(time.time(),corrida_id,u["id"]));con.commit();con.close();return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "A corrida não está em andamento.")
+
+
+# ============================================================
+# ADMIN - resumo financeiro das corridas
+# ============================================================
+@app.route("/admin")
+def admin():
+    if request.args.get("key")!=ADMIN_KEY:return "Acesso negado.",403
+    con=conectar();tot=con.execute("""
+      SELECT COUNT(*) corridas,
+             COALESCE(SUM(valor),0) faturamento,
+             COALESCE(SUM(taxa_admin),0) taxa_admin,
+             COALESCE(SUM(valor_motorista),0) motorista
+      FROM corridas_vai WHERE status='CONCLUIDA'
+    """).fetchone();ult=con.execute("""
+      SELECT c.id,c.partida,c.destino,c.valor,c.taxa_admin,c.valor_motorista,c.status,c.distancia_km,c.criada_em,p.nome passageiro_nome,m.nome motorista_nome
+      FROM corridas_vai c JOIN usuarios_vai p ON p.id=c.passageiro_id LEFT JOIN usuarios_vai m ON m.id=c.motorista_id
+      ORDER BY c.id DESC LIMIT 50
+    """).fetchall();con.close()
+    html=CSS+"""
+    <div class="card"><h1>📊 VaiMoto Admin</h1>
+    <div class="row"><div class="money"><b>Corridas concluídas</b><div class="price">{{ t['corridas'] }}</div></div><div class="money"><b>Faturamento</b><div class="price">R$ {{ '%.2f'|format(t['faturamento']) }}</div></div></div>
+    <div class="row"><div class="money"><b>🏢 Taxas do app (8%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (92%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
+    <h2>Últimas corridas</h2>{% for c in ult %}<div class="ride"><b>#{{c['id']}}</b> {{c['status']}}<br>{{c['passageiro_nome']}} → {{c['motorista_nome'] or 'sem motorista'}}<br>{{c['partida']}} → {{c['destino']}}<br>R$ {{'%.2f'|format(c['valor'])}} • App R$ {{'%.2f'|format(c['taxa_admin'] or 0)}} • Motorista R$ {{'%.2f'|format(c['valor_motorista'] or 0)}}</div>{% else %}<div class="box">Nenhuma corrida.</div>{% endfor %}</div>
+    """
+    return render_template_string(html,t=tot,ult=ult)
+
+
+# ============================================================
+# ERROS
+# ============================================================
+@app.errorhandler(404)
+def not_found(e):return "Página não encontrada.",404
+
+
+if __name__=="__main__":
+    inicializar_banco()
+    expirar_corridas_antigas()
+    print("="*60)
+    print("🏍️ VAIMOTO V10 INICIADO")
+    print("="*60)
+    print(f"Banco: {DB}")
+    print("Local: http://127.0.0.1:5000")
+    print("Rede:  http://0.0.0.0:5000")
+    print("Tarifa: R$ 1,20/km")
+    print("Taxa admin: 8% | Motorista: 92%")
+    print("IMPORTANTE: use http:// no iPhone/Android, não https://")
+    print("="*60)
+    app.run(host="0.0.0.0",port=5000,debug=False)
