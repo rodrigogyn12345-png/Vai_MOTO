@@ -155,7 +155,6 @@ def marcar_motoristas_expirados():
 
 
 def contar_motoristas_online():
-    marcar_motoristas_expirados()
     con = conectar()
     row = con.execute("""
         SELECT COUNT(*) AS total
