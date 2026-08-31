@@ -516,6 +516,18 @@ hr{border:0;border-top:1px solid #333;margin:22px 0}
     h1{font-size:25px}
     .logo{font-size:27px}
 }
+<style>
+#resultado.info {
+    color: #ffffff !important;
+    background: #172235 !important;
+    font-size: 16px !important;
+    line-height: 1.8 !important;
+    font-weight: 600 !important;
+}
+#resultado.info b {
+    color: #ffffff !important;
+}
+</style>
 </style>
 """
 
