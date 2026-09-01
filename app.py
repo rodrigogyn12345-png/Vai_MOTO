@@ -1,884 +1,1642 @@
-from flask import Flask, request, redirect, url_for, session, render_template_string, jsonify
-from pathlib import Path
+from flask import send_from_directory
+from flask import Flask, request, redirect, url_for, session, render_template_string, flash
 import sqlite3
-import time
-import re
-import math
-import json
-from urllib.parse import quote
-from urllib.request import Request, urlopen
+from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
-# ============================================================
-# VAIMOTO V10 - PASSAGEIRO + MOTORISTA + GPS + TARIFA
-# ============================================================
-# Tarifa: R$ 1,20/km
-# Taxa administrativa: 8%
-# Motorista: 92%
-# IMPORTANTE: este arquivo usa HTTP local. Abra no celular com
-# http://IP_DO_ANDROID:5000 (nao https://).
-# ============================================================
-
 app = Flask(__name__)
-app.secret_key = "vaimoto-v10-troque-esta-chave"
+app.secret_key = "VAI_DE_MOTO_CHAVE_TROCAR_DEPOIS"
 
-BASE_DIR = Path(__file__).resolve().parent
-DB = str(BASE_DIR / "vaimoto.db")
-
-PRECO_KM = 1.20
-TAXA_ADMIN = 0.08
-PERCENTUAL_MOTORISTA = 1.0 - TAXA_ADMIN
-ONLINE_TIMEOUT = 35
-LOCATION_TIMEOUT = 60
-PENDENTE_TIMEOUT = 10 * 60  # 10 minutos sem motorista: corrida pendente expira
-POLL_PASSAGEIRO = 2000
-POLL_MOTORISTA = 1500
-ADMIN_KEY = "vaimoto-admin-1234"  # troque antes de colocar na internet
-
-STATUS_ATIVOS = ("PENDENTE", "ACEITA", "EM_ANDAMENTO")
-
-
-def dinheiro(v):
-    return round(float(v or 0), 2)
+DB = "vai_de_moto.db"
+LIMITE_MOTOQUEIROS = 20
 
 
 def conectar():
-    con = sqlite3.connect(DB, timeout=15)
-    con.row_factory = sqlite3.Row
-    return con
+    conn = sqlite3.connect(DB)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
-def coluna_existe(con, tabela, coluna):
-    return any(r["name"] == coluna for r in con.execute(f"PRAGMA table_info({tabela})").fetchall())
+def iniciar_banco():
+    conn = conectar()
 
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS admins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            usuario TEXT UNIQUE NOT NULL,
+            senha TEXT NOT NULL
+        )
+    """)
 
-def inicializar_banco():
-    con = conectar()
-    con.execute("PRAGMA journal_mode=WAL")
-    con.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios_vai (
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS motoqueiros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT NOT NULL,
-            whatsapp TEXT NOT NULL UNIQUE,
-            senha TEXT NOT NULL,
-            tipo TEXT NOT NULL CHECK(tipo IN ('passageiro','motorista')),
-            online INTEGER NOT NULL DEFAULT 0,
-            last_seen REAL NOT NULL DEFAULT 0,
-            latitude REAL,
-            longitude REAL,
-            location_seen REAL NOT NULL DEFAULT 0,
-            criado_em REAL NOT NULL
+            telefone TEXT NOT NULL,
+            cpf TEXT NOT NULL,
+            moto TEXT NOT NULL,
+            placa TEXT NOT NULL,
+            localizacao TEXT NOT NULL,
+            observacao TEXT DEFAULT '',
+            status TEXT DEFAULT 'pendente',
+            conexao TEXT DEFAULT 'offline',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    con.execute("""
+
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS passageiros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            telefone TEXT NOT NULL,
+            cpf TEXT NOT NULL,
+            localizacao TEXT NOT NULL,
+            observacao TEXT DEFAULT '',
+            status TEXT DEFAULT 'ativo',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # ================================
+    # TABELA DE CORRIDAS
+    # ================================
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS corridas_vai (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            passageiro_id INTEGER NOT NULL,
-            partida TEXT NOT NULL,
-            destino TEXT NOT NULL,
-            valor REAL NOT NULL,
-            status TEXT NOT NULL DEFAULT 'PENDENTE',
+            passageiro_id INTEGER,
             motorista_id INTEGER,
-            latitude_partida REAL,
-            longitude_partida REAL,
-            latitude_destino REAL,
-            longitude_destino REAL,
-            distancia_km REAL,
-            preco_km REAL DEFAULT 1.20,
-            taxa_admin_percent REAL DEFAULT 8.0,
-            taxa_admin REAL DEFAULT 0,
-            valor_motorista REAL DEFAULT 0,
-            criada_em REAL NOT NULL,
-            aceita_em REAL,
-            iniciada_em REAL,
-            concluida_em REAL,
-            cancelada_em REAL
+            origem TEXT NOT NULL,
+            destino TEXT NOT NULL,
+            valor REAL DEFAULT 0,
+            status TEXT DEFAULT 'PENDENTE',
+            observacao TEXT DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            iniciado_em TIMESTAMP,
+            concluido_em TIMESTAMP,
+            cancelado_em TIMESTAMP,
+            FOREIGN KEY (passageiro_id) REFERENCES passageiros(id),
+            FOREIGN KEY (motorista_id) REFERENCES motoqueiros(id)
         )
     """)
+    # Cria o administrador inicial somente se ainda não existir.
+    admin = conn.execute(
+        "SELECT id FROM admins WHERE usuario = ?",
+        ("admin",)
+    ).fetchone()
 
-    usuarios = [
-        ("online", "INTEGER NOT NULL DEFAULT 0"),
-        ("last_seen", "REAL NOT NULL DEFAULT 0"),
-        ("latitude", "REAL"),
-        ("longitude", "REAL"),
-        ("location_seen", "REAL NOT NULL DEFAULT 0"),
-        ("criado_em", "REAL NOT NULL DEFAULT 0"),
-    ]
-    for col, typ in usuarios:
-        if not coluna_existe(con, "usuarios_vai", col):
-            con.execute(f"ALTER TABLE usuarios_vai ADD COLUMN {col} {typ}")
+    if not admin:
+        conn.execute(
+            "INSERT INTO admins (usuario, senha) VALUES (?, ?)",
+            ("admin", generate_password_hash("123456"))
+        )
 
-    corridas = [
-        ("motorista_id", "INTEGER"),
-        ("latitude_partida", "REAL"),
-        ("longitude_partida", "REAL"),
-        ("latitude_destino", "REAL"),
-        ("longitude_destino", "REAL"),
-        ("distancia_km", "REAL"),
-        ("preco_km", "REAL DEFAULT 1.20"),
-        ("taxa_admin_percent", "REAL DEFAULT 8.0"),
-        ("taxa_admin", "REAL DEFAULT 0"),
-        ("valor_motorista", "REAL DEFAULT 0"),
-        ("aceita_em", "REAL"),
-        ("iniciada_em", "REAL"),
-        ("concluida_em", "REAL"),
-        ("cancelada_em", "REAL"),
-    ]
-    for col, typ in corridas:
-        if not coluna_existe(con, "corridas_vai", col):
-            con.execute(f"ALTER TABLE corridas_vai ADD COLUMN {col} {typ}")
-
-    # Corridas antigas: conserva o valor e calcula a divisão administrativa.
-    con.execute("""
-        UPDATE corridas_vai
-        SET preco_km=COALESCE(preco_km, 1.20),
-            taxa_admin_percent=COALESCE(taxa_admin_percent, 8.0),
-            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.08, 2)),
-            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.92, 2))
-    """)
-    con.commit()
-    con.close()
+    conn.commit()
+    conn.close()
 
 
-def marcar_motoristas_expirados():
-    limite = time.time() - ONLINE_TIMEOUT
-    con = conectar()
-    con.execute("""
-        UPDATE usuarios_vai
-        SET online=0, latitude=NULL, longitude=NULL, location_seen=0
-        WHERE tipo='motorista' AND online=1 AND last_seen < ?
-    """, (limite,))
-    con.commit()
-    con.close()
+def login_obrigatorio(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if "admin_id" not in session:
+            return redirect(url_for("login"))
+        return func(*args, **kwargs)
+    return wrapper
 
 
-def expirar_corridas_antigas():
-    """Remove chamadas antigas da fila de motoristas.
-
-    Uma corrida PENDENTE que ficou mais de PENDENTE_TIMEOUT sem ser aceita
-    vira CANCELADA para não continuar aparecendo como chamada disponível.
-    """
-    limite = time.time() - PENDENTE_TIMEOUT
-    con = conectar()
-    con.execute("""
-        UPDATE corridas_vai
-        SET status='CANCELADA', cancelada_em=?
-        WHERE status='PENDENTE' AND criada_em < ?
-    """, (time.time(), limite))
-    con.commit()
-    con.close()
-
-
-def contar_motoristas_online():
-    marcar_motoristas_expirados()
-    expirar_corridas_antigas()
-    con = conectar()
-    n = con.execute("SELECT COUNT(*) total FROM usuarios_vai WHERE tipo='motorista' AND online=1").fetchone()["total"]
-    con.close()
-    return n
-
-
-def usuario_logado():
-    uid = session.get("usuario_id")
-    if not uid:
-        return None
-    con = conectar()
-    u = con.execute("SELECT * FROM usuarios_vai WHERE id=?", (uid,)).fetchone()
-    con.close()
-    return u
-
-
-def haversine_km(lat1, lon1, lat2, lon2):
-    r = 6371.0088
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2) ** 2
-    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-
-
-def geocodificar(endereco):
-    """Busca coordenadas do destino usando Nominatim/OpenStreetMap."""
-    url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=" + quote(endereco)
-    req = Request(url, headers={"User-Agent": "VaiMoto/10.0 local-app"})
-    with urlopen(req, timeout=8) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if not data:
-        return None
-    return float(data[0]["lat"]), float(data[0]["lon"]), data[0].get("display_name", endereco)
-
-
-def calcular_rota_osrm(lat1, lon1, lat2, lon2):
-    """Distancia por ruas usando OSRM. Retorna km ou None."""
-    url = (
-        "https://router.project-osrm.org/route/v1/driving/"
-        f"{lon1},{lat1};{lon2},{lat2}?overview=false"
-    )
-    req = Request(url, headers={"User-Agent": "VaiMoto/10.0 local-app"})
-    with urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    if data.get("code") != "Ok" or not data.get("routes"):
-        return None
-    return float(data["routes"][0]["distance"]) / 1000.0
-
-
-def rota_destino(lat1, lon1, destino):
-    geo = geocodificar(destino)
-    if not geo:
-        return None
-    lat2, lon2, nome = geo
-    try:
-        distancia = calcular_rota_osrm(lat1, lon1, lat2, lon2)
-        fonte = "rota por ruas"
-    except Exception:
-        distancia = None
-        fonte = "distância aproximada"
-    if distancia is None:
-        distancia = haversine_km(lat1, lon1, lat2, lon2)
-    return {
-        "latitude_destino": lat2,
-        "longitude_destino": lon2,
-        "destino_encontrado": nome,
-        "distancia_km": max(0.01, distancia),
-        "fonte_distancia": fonte,
-    }
-
-
-def calcular_valores(distancia_km):
-    total = dinheiro(distancia_km * PRECO_KM)
-    taxa = dinheiro(total * TAXA_ADMIN)
-    motorista = dinheiro(total - taxa)
-    return total, taxa, motorista
-
-
-def sessao_tipo(tipo):
-    u = usuario_logado()
-    return u and u["tipo"] == tipo
-
-
-# ============================================================
-# CSS
-# ============================================================
-CSS = """
+BASE = """
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" href="/icone/icon-192.png">
+<meta name="theme-color" content="#111827">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VAI_DE_MOTO — ADMIN</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f1f3f6;font-family:Arial,sans-serif;color:#111}
-.card{width:min(94%,760px);margin:18px auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 8px 25px rgba(0,0,0,.10)}
-h1{margin:0 0 8px;font-size:30px}h2{font-size:23px;margin:12px 0}p{font-size:17px}
-input,select{width:100%;padding:15px;margin:6px 0 12px;border:1px solid #ccc;border-radius:14px;font-size:17px;background:#fff}
-button,.btn{display:block;width:100%;padding:15px;margin:9px 0;border:0;border-radius:14px;font-size:18px;text-align:center;text-decoration:none;cursor:pointer}
-.green{background:#159447;color:#fff}.black{background:#111;color:#fff}.gray{background:#666;color:#fff}.red{background:#c62828;color:#fff}.blue{background:#1769aa;color:#fff}.orange{background:#e67e22;color:#fff}
-.status{padding:15px;border-radius:14px;margin:12px 0;font-size:19px;font-weight:bold;text-align:center}.online{background:#dff7e6;color:#08752e}.offline{background:#eee;color:#555}
-.box,.ride{border:1px solid #ddd;border-radius:16px;padding:15px;margin:12px 0;background:#fff}.ride{border-width:2px}.gps{background:#eef6ff;border-color:#cfe5ff}
-.small{font-size:14px;color:#666}.badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#eee;font-size:12px;font-weight:bold}
-.row{display:flex;gap:8px}.row>*{flex:1}.price{font-size:28px;font-weight:bold;margin:8px 0}.maplink{color:#1769aa;font-weight:bold;text-decoration:none}
-.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.top .badge{margin-top:5px}
-.money{background:#f8fff9;border:1px solid #c9e8d1;border-radius:14px;padding:12px}.warn{background:#fff7e6;border:1px solid #ffd27a;border-radius:14px;padding:12px}
-@media(max-width:520px){.card{width:96%;padding:15px}h1{font-size:26px}.row{display:block}}
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,sans-serif;
+    background:#f1f3f5;
+    color:#222;
+}
+.topo{
+    background:#111;
+    color:#fff;
+    padding:18px 16px;
+    font-size:25px;
+    font-weight:bold;
+}
+.menu{
+    background:#fff;
+    display:flex;
+    gap:10px;
+    padding:12px;
+    overflow-x:auto;
+    border-bottom:1px solid #ddd;
+}
+.menu a{
+    background:#eee;
+    color:#222;
+    text-decoration:none;
+    padding:14px 20px;
+    border-radius:12px;
+    white-space:nowrap;
+    font-size:18px;
+}
+.menu a:hover{background:#ddd}
+.container{
+    max-width:1100px;
+    margin:25px auto;
+    padding:0 15px;
+}
+h1{font-size:42px;margin:15px 0 25px}
+h2{font-size:27px}
+.card{
+    background:#fff;
+    border-radius:18px;
+    padding:22px;
+    margin-bottom:20px;
+    box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+.grid{
+    display:grid;
+    grid-template-columns:repeat(2,1fr);
+    gap:18px;
+}
+.stat{
+    background:#fff;
+    border-radius:18px;
+    padding:25px;
+    box-shadow:0 2px 10px rgba(0,0,0,.06);
+}
+.stat .titulo{font-size:23px;font-weight:bold}
+.stat .numero{font-size:38px;font-weight:bold;margin-top:15px}
+form{margin:0}
+label{
+    display:block;
+    font-weight:bold;
+    margin:12px 0 6px;
+}
+input,textarea,select{
+    width:100%;
+    padding:14px;
+    border:1px solid #ccc;
+    border-radius:10px;
+    font-size:16px;
+}
+textarea{min-height:90px;resize:vertical}
+button,.btn{
+    display:inline-block;
+    border:0;
+    background:#111;
+    color:#fff;
+    padding:12px 16px;
+    border-radius:10px;
+    text-decoration:none;
+    cursor:pointer;
+    font-size:15px;
+    margin:4px 2px;
+}
+.btn-verde{background:#16833b}
+.btn-vermelho{background:#c62828}
+.btn-cinza{background:#666}
+.btn-azul{background:#1769aa}
+.alert{
+    background:#fff3cd;
+    color:#664d03;
+    padding:14px;
+    border-radius:10px;
+    margin-bottom:15px;
+}
+.sucesso{
+    background:#d1e7dd;
+    color:#0f5132;
+}
+.erro{
+    background:#f8d7da;
+    color:#842029;
+}
+table{
+    width:100%;
+    border-collapse:collapse;
+    min-width:900px;
+}
+th,td{
+    padding:12px;
+    border-bottom:1px solid #ddd;
+    text-align:left;
+    vertical-align:top;
+}
+th{background:#f5f5f5}
+.tabela{overflow-x:auto}
+.badge{
+    display:inline-block;
+    padding:6px 9px;
+    border-radius:20px;
+    background:#eee;
+    font-weight:bold;
+}
+.pendente{background:#fff3cd}
+.aprovado{background:#d1e7dd}
+.reprovado{background:#f8d7da}
+.online{background:#d1e7dd}
+.offline{background:#eee}
+.login{
+    max-width:520px;
+    margin:70px auto;
+    padding:20px;
+}
+.login .card{padding:35px}
+.login h1{font-size:35px}
+@media(max-width:700px){
+    .grid{grid-template-columns:1fr}
+    h1{font-size:34px}
+    .topo{font-size:21px}
+}
 </style>
-"""
 
+<style>
+#vaiSplash {
+    position:fixed;
+    inset:0;
+    z-index:99999;
+    background:#111827;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    flex-direction:column;
+    transition:opacity .5s ease;
+}
+#vaiSplash img {
+    width:min(75vw,320px);
+    max-height:320px;
+    object-fit:contain;
+    border-radius:30px;
+}
+#vaiSplash .splash-titulo {
+    margin-top:20px;
+    color:white;
+    font-size:28px;
+    font-weight:800;
+    letter-spacing:1px;
+}
+#vaiSplash .splash-carregando {
+    margin-top:12px;
+    color:#d1d5db;
+    font-size:15px;
+}
+</style>
 
-# ============================================================
-# HOME / CADASTRO / LOGIN
-# ============================================================
-HOME = CSS + """
-<div class="card">
-  <h1>🏍️ VaiMoto V10</h1>
-  <p>Solicite sua corrida ou trabalhe como motorista.</p>
-  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 8%</div>
-  <a class="btn black" href="{{ url_for('login') }}">Entrar</a>
-  <a class="btn green" href="{{ url_for('cadastro') }}">Criar cadastro</a>
+</head>
+<body>
+
+<div id="vaiSplash">
+    <img src="/icone/splash-vai-de-moto.png"
+         onerror="this.src='/icone/logo-vai-de-moto.png'">
+    <div class="splash-titulo">VAI_DE_MOTO</div>
+    <div class="splash-carregando">Carregando...</div>
 </div>
-"""
 
-CADASTRO = CSS + """
-<div class="card">
-  <h1>📝 Cadastro</h1>
-  {% if erro %}<div class="box" style="color:#b00020">❌ {{ erro }}</div>{% endif %}
-  <form method="post">
-    <input name="nome" placeholder="Nome completo" value="{{ dados.get('nome','') }}" autocomplete="name" required>
-    <input name="whatsapp" placeholder="WhatsApp com DDD" value="{{ dados.get('whatsapp','') }}" inputmode="tel" autocomplete="tel" required>
-    <input name="senha" type="password" placeholder="Senha (mínimo 4 caracteres)" minlength="4" required>
-    <select name="tipo" required>
-      <option value="passageiro" {% if dados.get('tipo')=='passageiro' %}selected{% endif %}>Passageiro</option>
-      <option value="motorista" {% if dados.get('tipo')=='motorista' %}selected{% endif %}>Motoboy/Mototaxista</option>
-    </select>
-    <button class="green" type="submit">Cadastrar</button>
-  </form>
-  <a class="btn gray" href="{{ url_for('index') }}">Voltar</a>
+
+<div class="top" style="display:flex;align-items:center;gap:12px;padding:10px 18px;"><img src="/static/logo-vai-de-moto.png" alt="VAI_DE_MOTO" style="width:52px;height:52px;object-fit:contain;border-radius:12px;"><div><div style="font-size:22px;font-weight:800;">VAI_DE_MOTO — ADMIN</div><div style="font-size:13px;opacity:.75;">PAINEL ADMINISTRATIVO</div></div></div>
+
+{% if session.get("admin_id") %}
+<div class="menu">
+    <a href="{{ url_for('dashboard') }}">📊 Início</a>
+    <a href="{{ url_for('motoqueiros') }}">🏍️ Motoqueiros</a>
+    <a href="{{ url_for("passageiros") }}">👥 Passageiros</a>
+    <a href="/corridas">🚕 Corridas</a>
+    <a href="{{ url_for('logout') }}">🚪 Sair</a>
 </div>
-"""
+{% endif %}
 
-LOGIN = CSS + """
-<div class="card">
-  <h1>🔐 Entrar</h1>
-  {% if erro %}<div class="box" style="color:#b00020">❌ {{ erro }}</div>{% endif %}
-  <form method="post">
-    <input name="whatsapp" placeholder="WhatsApp" inputmode="tel" required>
-    <input name="senha" type="password" placeholder="Senha" required>
-    <button class="black" type="submit">Entrar</button>
-  </form>
-  <a class="btn gray" href="{{ url_for('index') }}">Voltar</a>
-</div>
-"""
+<div class="container">
+{% with mensagens = get_flashed_messages(with_categories=true) %}
+    {% for categoria, mensagem in mensagens %}
+        <div class="alert {{ categoria }}">{{ mensagem }}</div>
+    {% endfor %}
+{% endwith %}
 
-
-# ============================================================
-# PASSAGEIRO
-# ============================================================
-PASSAGEIRO = CSS + """
-<div class="card">
-  <div class="top">
-    <div><div class="small">🏍️ VAIMOTO</div><h1>Olá, {{ usuario['nome'] }} 👋</h1></div>
-    <div class="badge">🟢 <span id="onlineCount">{{ online }}</span> online</div>
-  </div>
-
-  <div id="gpsStatus" class="status offline">📍 GPS aguardando</div>
-
-  <div class="box gps">
-    <b>📍 Origem / embarque</b>
-    <p class="small">Use o GPS para pegar sua posição atual.</p>
-    <button class="blue" type="button" onclick="capturarGPS()">📍 USAR MINHA LOCALIZAÇÃO</button>
-    <div id="gpsText" class="small">Nenhuma localização capturada.</div>
-  </div>
-
-  <div class="box">
-    <h2>🚕 Solicitar corrida</h2>
-    <label><b>Origem</b></label>
-    <input id="partida" placeholder="Origem / endereço de embarque" required>
-    <label><b>Destino</b></label>
-    <input id="destino" placeholder="Digite o endereço de destino" autocomplete="street-address" required>
-    <input type="hidden" id="latitude_partida">
-    <input type="hidden" id="longitude_partida">
-
-    <button class="blue" id="btnCalcular" type="button" onclick="calcularCorrida()">🧮 CALCULAR VALOR</button>
-    <div id="calculo" style="display:none" class="money">
-      <div>📏 Distância: <b id="distancia">0,00 km</b></div>
-      <div class="price" id="valor">R$ 0,00</div>
-      <div>🏢 Taxa do app (8%): <b id="taxa">R$ 0,00</b></div>
-      <div>🏍️ Motorista recebe (92%): <b id="motoristaValor">R$ 0,00</b></div>
-      <div class="small" id="fonteRota"></div>
-    </div>
-    <div style="margin:12px 0">
-<label><b>💳 Forma de pagamento</b></label>
-<select id="formaPagamento" required>
-<option value="DINHEIRO">💵 Dinheiro</option>
-<option value="PIX">🟢 Pix</option>
-<option value="CARTAO">💳 Cartão</option>
-</select>
-</div>
-<button class="green" id="btnSolicitar" type="button" onclick="solicitarCorrida()" disabled>🏍️ SOLICITAR CORRIDA</button>
-    <div id="msgCorrida" class="small"></div>
-  </div>
-
-  <div class="box" id="chamadaBox">
-    <h2>📲 Chamada do motorista</h2>
-    <div id="chamadaStatus" class="status offline">Nenhuma corrida ativa.</div>
-    <div id="motoristaAtivo" class="small">Depois que um motorista aceitar, o telefone e a localização aparecem aqui.</div>
-  </div>
-
-  <div class="box" id="mapBox" style="display:none">
-    <b>🗺️ Acompanhar motorista</b>
-    <div id="mapInfo" class="small"></div>
-    <a id="mapMotorista" class="btn blue" target="_blank" rel="noopener">📍 VER MOTORISTA NO MAPA</a>
-  </div>
-
-  <h2>📋 Minhas corridas</h2>
-  <div id="corridas"><div class="box">Carregando...</div></div>
-  <a class="btn gray" href="{{ url_for('logout') }}">Sair</a>
+{{ conteudo|safe }}
 </div>
 
 <script>
-let gpsLat=null,gpsLon=null,gpsWatch=null;
-let calculoAtual=null;
-let ultimaNotificacao={};
-let audioLiberado=false;
+window.addEventListener("load", function() {
+    setTimeout(function() {
+        const splash = document.getElementById("vaiSplash");
+        if (splash) {
+            splash.style.opacity = "0";
+            setTimeout(function() {
+                splash.remove();
+            }, 500);
+        }
+    }, 1200);
 
-function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function som(){
-  if(!audioLiberado)return;
-  try{const C=AudioContext||webkitAudioContext,ctx=new C(),o=ctx.createOscillator(),g=ctx.createGain();
-  o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ctx.destination);o.start();
-  setTimeout(()=>o.frequency.value=1175,130);setTimeout(()=>{o.stop();ctx.close()},320);}catch(e){}
-}
-function liberarAudio(){audioLiberado=true}
-document.addEventListener('click',liberarAudio,{once:true});
-
-function mostrarGPS(lat,lon,acc){
-  gpsLat=lat;gpsLon=lon;
-  document.getElementById('latitude_partida').value=lat;
-  document.getElementById('longitude_partida').value=lon;
-  document.getElementById('partida').value='Minha localização atual';
-  document.getElementById('gpsStatus').className='status online';
-  document.getElementById('gpsStatus').textContent='🟢 GPS ATIVO';
-  document.getElementById('gpsText').textContent='📍 '+lat.toFixed(6)+', '+lon.toFixed(6)+' • precisão ~'+Math.round(acc||0)+' m';
-  fetch('/api/passageiro/localizacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:lat,longitude:lon})}).catch(()=>{});
-}
-function iniciarGPS(){
-  if(!navigator.geolocation){alert('Este navegador não oferece GPS.');return;}
-  if(gpsWatch!==null)return;
-  gpsWatch=navigator.geolocation.watchPosition(p=>mostrarGPS(p.coords.latitude,p.coords.longitude,p.coords.accuracy),e=>{
-    document.getElementById('gpsStatus').className='status offline';
-    document.getElementById('gpsStatus').textContent='⚠️ Permita a localização do navegador';
-  },{enableHighAccuracy:true,maximumAge:5000,timeout:15000});
-}
-function capturarGPS(){
-  if(!navigator.geolocation){alert('GPS não disponível.');return;}
-  document.getElementById('gpsStatus').textContent='📍 Obtendo GPS...';
-  navigator.geolocation.getCurrentPosition(p=>{mostrarGPS(p.coords.latitude,p.coords.longitude,p.coords.accuracy);iniciarGPS()},e=>alert('Não consegui acessar o GPS. Ative a localização e permita o acesso do navegador.'),{enableHighAccuracy:true,timeout:15000,maximumAge:0});
-}
-
-async function calcularCorrida(){
-  const destino=document.getElementById('destino').value.trim();
-  if(gpsLat===null||gpsLon===null){alert('Primeiro toque em USAR MINHA LOCALIZAÇÃO.');return;}
-  if(!destino){alert('Digite o destino.');return;}
-  const b=document.getElementById('btnCalcular');b.disabled=true;b.textContent='🧮 CALCULANDO ROTA...';
-  try{
-    const r=await fetch('/api/calcular-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude_partida:gpsLat,longitude_partida:gpsLon,destino:destino})});
-    const d=await r.json();
-    if(!d.ok){alert(d.erro||'Não foi possível calcular a rota.');return;}
-    calculoAtual=d;
-    document.getElementById('distancia').textContent=Number(d.distancia_km).toFixed(2).replace('.',',')+' km';
-    document.getElementById('valor').textContent=br(d.valor);
-    document.getElementById('taxa').textContent=br(d.taxa_admin);
-    document.getElementById('motoristaValor').textContent=br(d.valor_motorista);
-    document.getElementById('fonteRota').textContent=d.fonte_distancia==='rota por ruas'?'🗺️ Valor calculado pela rota de carro/moto.':'📏 Valor aproximado pela distância GPS.';
-    document.getElementById('calculo').style.display='block';
-    document.getElementById('btnSolicitar').disabled=false;
-    document.getElementById('msgCorrida').textContent='Destino localizado: '+d.destino_encontrado;
-  }catch(e){alert('Falha ao calcular. Verifique sua internet e tente novamente.');}
-  finally{b.disabled=false;b.textContent='🧮 CALCULAR VALOR';}
-}
-
-async function solicitarCorrida(){
-  if(!calculoAtual)return;
-  const partida=document.getElementById('partida').value.trim();
-  const destino=document.getElementById('destino').value.trim();
-  if(!partida||!destino){alert('Preencha origem e destino.');return;}
-  const b=document.getElementById('btnSolicitar');b.disabled=true;b.textContent='📲 CHAMANDO MOTORISTAS...';
-  try{
-    const r=await fetch('/api/solicitar-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-      partida,destino,latitude_partida:gpsLat,longitude_partida:gpsLon,
-      latitude_destino:calculoAtual.latitude_destino,longitude_destino:calculoAtual.longitude_destino,
-      distancia_km:calculoAtual.distancia_km,forma_pagamento:document.getElementById('formaPagamento').value,valor:calculoAtual.valor,
-      taxa_admin:calculoAtual.taxa_admin,valor_motorista:calculoAtual.valor_motorista
-    })});
-    const d=await r.json();
-    if(!d.ok){alert(d.erro||'Não foi possível solicitar.');return;}
-    som();
-    document.getElementById('msgCorrida').textContent='📲 Corrida #'+d.corrida.id+' enviada aos motoristas online.';
-    calculoAtual=null;document.getElementById('btnSolicitar').disabled=true;
-    carregarCorridas();
-  }catch(e){alert('Falha de conexão com o servidor.');}
-  finally{b.disabled=false;b.textContent='🏍️ SOLICITAR CORRIDA';}
-}
-
-function renderCorridas(lista){
-  const area=document.getElementById('corridas');
-  if(!lista.length){area.innerHTML='<div class="box">Você ainda não solicitou nenhuma corrida.</div>';return;}
-  area.innerHTML='';
-  lista.forEach(c=>{
-    let s='';
-    if(c.status==='PENDENTE')s='<div class="status online">🔎 CHAMANDO MOTORISTA...</div>';
-    if(c.status==='ACEITA')s='<div class="status online">✅ MOTORISTA ACEITOU</div>';
-    if(c.status==='EM_ANDAMENTO')s='<div class="status online">🏍️ CORRIDA EM ANDAMENTO</div>';
-    if(c.status==='CONCLUIDA')s='<div class="status online">🏁 CORRIDA CONCLUÍDA</div>';
-    if(c.status==='CANCELADA')s='<div class="status offline">❌ CORRIDA CANCELADA</div>';
-    let motorista='';
-    if(c.motorista_nome){motorista='<div class="box"><b>🏍️ '+esc(c.motorista_nome)+'</b><br>📞 '+esc(c.motorista_whatsapp||'')+'<a class="btn green" href="tel:'+esc(c.motorista_whatsapp||'')+'">📞 LIGAR PARA MOTORISTA</a>';
-      if(c.motorista_lat!=null&&c.motorista_lon!=null){motorista+='<a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+c.motorista_lat+','+c.motorista_lon+'">📍 VER MOTORISTA NO MAPA</a>';}
-      motorista+='</div>';
+    if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("/service-worker.js")
+            .catch(function(err) {
+                console.log("PWA:", err);
+            });
     }
-    let cancel='';if(c.status==='PENDENTE'||c.status==='ACEITA')cancel='<button class="red" onclick="cancelarCorrida('+c.id+')">❌ CANCELAR CORRIDA</button>';
-    const el=document.createElement('div');el.className='ride';
-    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Motorista 92%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
-    area.appendChild(el);
-    const old=ultimaNotificacao[c.id];
-    if(old && old!==c.status && c.status==='ACEITA'){som();if(navigator.vibrate)navigator.vibrate([200,100,300]);}
-    ultimaNotificacao[c.id]=c.status;
-    if(c.status==='ACEITA'||c.status==='EM_ANDAMENTO'){
-      document.getElementById('chamadaStatus').className='status online';
-      document.getElementById('chamadaStatus').textContent=c.status==='ACEITA'?'✅ MOTORISTA A CAMINHO':'🏍️ CORRIDA EM ANDAMENTO';
-      document.getElementById('motoristaAtivo').textContent=c.motorista_nome?'Motorista: '+c.motorista_nome:'Motorista encontrado.';
-      if(c.motorista_lat!=null&&c.motorista_lon!=null){document.getElementById('mapBox').style.display='block';document.getElementById('mapInfo').textContent='GPS do motorista: '+Number(c.motorista_lat).toFixed(6)+', '+Number(c.motorista_lon).toFixed(6);document.getElementById('mapMotorista').href='https://www.google.com/maps/search/?api=1&query='+c.motorista_lat+','+c.motorista_lon;}
-    }
-  });
-}
-async function carregarCorridas(){
-  try{const r=await fetch('/api/minhas-corridas');if(!r.ok)return;const d=await r.json();renderCorridas(d.corridas||[]);}catch(e){}
-}
-async function cancelarCorrida(id){
-  if(!confirm('Cancelar esta corrida?'))return;
-  const r=await fetch('/api/corrida/'+id+'/cancelar',{method:'POST'});const d=await r.json();
-  if(!d.ok){alert(d.erro||'Não foi possível cancelar.');return;}som();carregarCorridas();
-}
-async function atualizarOnline(){try{const r=await fetch('/api/motoristas-online');const d=await r.json();document.getElementById('onlineCount').textContent=d.online}catch(e){}}
-
-iniciarGPS();carregarCorridas();atualizarOnline();
-setInterval(carregarCorridas,{{ poll }});setInterval(atualizarOnline,5000);
+});
 </script>
+
+</body>
+</html>
 """
 
 
-# ============================================================
-# MOTORISTA
-# ============================================================
-MOTORISTA = CSS + """
+def pagina(conteudo):
+    return render_template_string(BASE, conteudo=conteudo)
+
+
+LOGIN_HTML = """
+<div class="login">
 <div class="card">
-  <div class="top"><div><div class="small">🏍️ VAIMOTO</div><h1>{{ usuario['nome'] }}</h1></div><div class="badge">👤 MOTORISTA</div></div>
-  <div id="onlineBox" class="status {% if usuario['online'] %}online{% else %}offline{% endif %}">{% if usuario['online'] %}🟢 MOTORISTA ONLINE{% else %}⚪ MOTORISTA OFFLINE{% endif %}</div>
-  <button id="toggleBtn" class="{% if usuario['online'] %}red{% else %}green{% endif %}" onclick="alternarOnline()">{% if usuario['online'] %}FICAR OFFLINE{% else %}FICAR ONLINE{% endif %}</button>
+<h1><img src="/icone/logo-vai-de-moto.png" style="height:55px;vertical-align:middle;border-radius:12px;"> VAI_DE_MOTO</h1>
+<h2>Painel Administrativo</h2>
 
-  <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>
+<form method="post">
+<label>Usuário</label>
+<input name="usuario" placeholder="Usuário" required>
 
-  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 92% • app fica com 8%</div>
+<label>Senha</label>
+<input name="senha" type="password" placeholder="Senha" required>
 
-  <h2>🔔 Corridas disponíveis</h2>
-  <div id="corridas"><div class="box">Carregando...</div></div>
+<button type="submit" style="width:100%;margin-top:18px;font-size:18px">
+ENTRAR
+</button>
+</form>
 
-  <h2>🏍️ Minha corrida</h2>
-  <div id="minhaCorrida"><div class="box">Nenhuma corrida aceita.</div></div>
-
-  <p class="small">Deixe esta página aberta para continuar online. O GPS depende da permissão de localização do navegador.</p>
-  <a class="btn gray" href="{{ url_for('logout') }}">Sair</a>
+<div class="alert" style="margin-top:20px">
+Usuário inicial: <b>admin</b><br>
+Senha inicial: <b>123456</b>
 </div>
-<script>
-let online={{ 'true' if usuario['online'] else 'false' }};let gpsWatch=null;let ultimoId=null;let ultimoStatus=null;let audioLiberado=false;
-function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
-function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function som(){if(!audioLiberado)return;try{const C=AudioContext||webkitAudioContext,ctx=new C(),o=ctx.createOscillator(),g=ctx.createGain();o.frequency.value=700;g.gain.value=.1;o.connect(g);g.connect(ctx.destination);o.start();setTimeout(()=>o.frequency.value=1100,150);setTimeout(()=>{o.stop();ctx.close()},450)}catch(e){}}
-document.addEventListener('click',()=>{audioLiberado=true},{once:true});
-function gps(){if(!online||!navigator.geolocation)return;if(gpsWatch!==null)return;gpsWatch=navigator.geolocation.watchPosition(p=>{document.getElementById('gpsText').textContent='🟢 GPS ativo: '+p.coords.latitude.toFixed(6)+', '+p.coords.longitude.toFixed(6)+' • precisão ~'+Math.round(p.coords.accuracy||0)+' m';fetch('/api/motorista/localizacao',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:p.coords.latitude,longitude:p.coords.longitude})}).catch(()=>{})},()=>{document.getElementById('gpsText').textContent='⚠️ Permita a localização do navegador.'},{enableHighAccuracy:true,maximumAge:5000,timeout:15000});}
-function pararGPS(){if(gpsWatch!==null){navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null;}document.getElementById('gpsText').textContent='GPS desligado.';}
-async function alternarOnline(){const novo=!online;const b=document.getElementById('toggleBtn');b.disabled=true;try{const r=await fetch('/api/motorista/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({online:novo})});const d=await r.json();if(!d.ok){alert(d.erro||'Erro');return;}online=!!d.online;const box=document.getElementById('onlineBox');box.className='status '+(online?'online':'offline');box.textContent=online?'🟢 MOTORISTA ONLINE':'⚪ MOTORISTA OFFLINE';b.className=online?'red':'green';b.textContent=online?'FICAR OFFLINE':'FICAR ONLINE';if(online)gps();else pararGPS();carregarCorridas();}catch(e){alert('Falha de conexão.')}finally{b.disabled=false;}}
-async function carregarCorridas(){
-  if(!online){document.getElementById('corridas').innerHTML='<div class="box">Fique online para receber chamadas.</div>';return;}
-  try{const r=await fetch('/api/corridas-disponiveis');if(!r.ok)return;const d=await r.json();const area=document.getElementById('corridas');
-    if(!d.corridas.length){area.innerHTML='<div class="box">Nenhuma corrida pendente no momento.</div>';return;}
-    area.innerHTML='';d.corridas.forEach(c=>{if(ultimoId!==c.id){som();if(navigator.vibrate)navigator.vibrate([300,150,300]);ultimoId=c.id;}
-      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
-  }catch(e){}}
-async function aceitar(id){const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Essa corrida já foi aceita.');carregarCorridas();return;}som();carregarCorridas();carregarMinhaCorrida();}
-async function carregarMinhaCorrida(){try{const r=await fetch('/api/minha-corrida-motorista');if(!r.ok)return;const d=await r.json();const c=d.corrida;const area=document.getElementById('minhaCorrida');if(!c){area.innerHTML='<div class="box">Nenhuma corrida aceita.</div>';return;}if(ultimoStatus&&ultimoStatus!==c.status)som();ultimoStatus=c.status;
- let botoes='';if(c.status==='ACEITA')botoes+='<button class="green" onclick="iniciar('+c.id+')">🏍️ INICIAR CORRIDA</button>';if(c.status==='EM_ANDAMENTO')botoes+='<button class="black" onclick="concluir('+c.id+')">✅ CONCLUIR CORRIDA</button>';
- area.innerHTML='<div class="ride"><b>🚕 Corrida #'+c.id+'</b><span class="badge">'+esc(c.status)+'</span><br>👤 '+esc(c.passageiro_nome)+'<br>📞 '+esc(c.passageiro_whatsapp)+'<br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="money">🏍️ Seu ganho: <b>'+br(c.valor_motorista)+'</b><br>🏢 Taxa do app: '+br(c.taxa_admin)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+(c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida))+'">📍 ABRIR EMBARQUE</a><a class="btn orange" href="tel:'+esc(c.passageiro_whatsapp)+'">📞 LIGAR PARA PASSAGEIRO</a>'+botoes+'</div>';
- }catch(e){}}
-async function iniciar(id){const r=await fetch('/api/corrida/'+id+'/iniciar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível iniciar.');return;}som();carregarMinhaCorrida();carregarCorridas();}
-async function concluir(id){if(!confirm('Concluir esta corrida?'))return;const r=await fetch('/api/corrida/'+id+'/concluir',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível concluir.');return;}som();carregarMinhaCorrida();carregarCorridas();}
-if(online)gps();carregarCorridas();carregarMinhaCorrida();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida()}},{{ poll }});
-</script>
+</div>
+</div>
 """
 
 
-# ============================================================
-# ROTAS BÁSICAS
-# ============================================================
-@app.route("/")
-def index():
-    return render_template_string(HOME)
-
-
-@app.route("/cadastro", methods=["GET", "POST"])
-def cadastro():
-    dados={"nome":"","whatsapp":"","tipo":"passageiro"}
-    erro=""
-    if request.method=="POST":
-        dados["nome"]=request.form.get("nome","").strip()
-        dados["whatsapp"]=re.sub(r"\D","",request.form.get("whatsapp","").strip())
-        dados["tipo"]=request.form.get("tipo","passageiro").strip()
-        senha=request.form.get("senha","")
-        if len(dados["nome"])<2: erro="Digite seu nome completo."
-        elif len(dados["whatsapp"])<10: erro="Digite um WhatsApp válido com DDD."
-        elif len(senha)<4: erro="A senha precisa ter pelo menos 4 caracteres."
-        elif dados["tipo"] not in ("passageiro","motorista"): erro="Tipo de conta inválido."
-        else:
-            con=conectar()
-            try:
-                if con.execute("SELECT id FROM usuarios_vai WHERE whatsapp=?",(dados["whatsapp"],)).fetchone():
-                    erro="Esse WhatsApp já está cadastrado."
-                else:
-                    cur=con.execute("""
-                        INSERT INTO usuarios_vai(nome,whatsapp,senha,tipo,online,last_seen,latitude,longitude,location_seen,criado_em)
-                        VALUES(?,?,?,?,0,0,NULL,NULL,0,?)
-                    """,(dados["nome"],dados["whatsapp"],generate_password_hash(senha),dados["tipo"],time.time()))
-                    con.commit();session["usuario_id"]=cur.lastrowid
-                    return redirect(url_for("motorista" if dados["tipo"]=="motorista" else "passageiro"))
-            except sqlite3.IntegrityError: con.rollback();erro="Esse WhatsApp já está cadastrado."
-            finally: con.close()
-    return render_template_string(CADASTRO,dados=dados,erro=erro)
-
-
-@app.route("/login", methods=["GET","POST"])
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    erro=""
-    if request.method=="POST":
-        whatsapp=re.sub(r"\D","",request.form.get("whatsapp","").strip())
-        senha=request.form.get("senha","")
-        con=conectar();u=con.execute("SELECT * FROM usuarios_vai WHERE whatsapp=?",(whatsapp,)).fetchone();con.close()
-        if u and check_password_hash(u["senha"],senha):
-            session["usuario_id"]=u["id"];return redirect(url_for("motorista" if u["tipo"]=="motorista" else "passageiro"))
-        erro="WhatsApp ou senha incorretos."
-    return render_template_string(LOGIN,erro=erro)
+    if request.method == "POST":
+        usuario = request.form.get("usuario", "").strip()
+        senha = request.form.get("senha", "")
+
+        conn = conectar()
+        admin = conn.execute(
+            "SELECT * FROM admins WHERE usuario = ?",
+            (usuario,)
+        ).fetchone()
+        conn.close()
+
+        if admin and check_password_hash(admin["senha"], senha):
+            session["admin_id"] = admin["id"]
+            session["admin_usuario"] = admin["usuario"]
+            return redirect(url_for("dashboard"))
+
+        flash("Usuário ou senha inválidos.", "erro")
+
+    return pagina(LOGIN_HTML)
 
 
 @app.route("/logout")
 def logout():
-    uid=session.get("usuario_id")
-    if uid:
-        con=conectar();con.execute("UPDATE usuarios_vai SET online=0,last_seen=0,latitude=NULL,longitude=NULL,location_seen=0 WHERE id=? AND tipo='motorista'",(uid,));con.commit();con.close()
-    session.clear();return redirect(url_for("index"))
+    session.clear()
+    return redirect(url_for("login"))
 
 
-# ============================================================
-# PASSAGEIRO
-# ============================================================
-@app.route("/passageiro")
-def passageiro():
-    u=usuario_logado()
-    if not u:return redirect(url_for("login"))
-    if u["tipo"]!="passageiro":return "Acesso permitido somente para passageiros.",403
-    return render_template_string(PASSAGEIRO,usuario=u,online=contar_motoristas_online(),poll=POLL_PASSAGEIRO)
+@app.route("/")
+@login_obrigatorio
+def dashboard():
+    conn = conectar()
+
+    total = conn.execute(
+        "SELECT COUNT(*) AS n FROM motoqueiros"
+    ).fetchone()["n"]
+
+    aprovados = conn.execute(
+        "SELECT COUNT(*) AS n FROM motoqueiros WHERE status='aprovado'"
+    ).fetchone()["n"]
+
+    pendentes = conn.execute(
+        "SELECT COUNT(*) AS n FROM motoqueiros WHERE status='pendente'"
+    ).fetchone()["n"]
+
+    online = conn.execute(
+        "SELECT COUNT(*) AS n FROM motoqueiros WHERE conexao='online'"
+    ).fetchone()["n"]
+
+    passageiros_total = conn.execute(
+        "SELECT COUNT(*) AS n FROM passageiros"
+    ).fetchone()["n"]
+
+    conn.close()
+
+    html = f"""
+    
+<div style="display:flex;align-items:center;gap:15px;margin-bottom:25px;">
+    <img src="/icone/logo-vai-de-moto.png"
+         style="width:85px;height:85px;object-fit:contain;border-radius:18px;"
+         alt="VAI_DE_MOTO">
+    <div>
+        <h1 style="margin:0;">VAI_DE_MOTO</h1>
+        <div style="font-size:18px;color:#666;margin-top:4px;">
+            Painel Administrativo
+        </div>
+    </div>
+</div>
 
 
-@app.route("/api/calcular-corrida", methods=["POST"])
-def api_calcular_corrida():
-    u=usuario_logado()
-    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Faça login como passageiro."),401
-    d=request.get_json(silent=True) or {}
-    try:
-        lat=float(d.get("latitude_partida"));lon=float(d.get("longitude_partida"))
-        if not (-90<=lat<=90 and -180<=lon<=180):raise ValueError
-    except (TypeError,ValueError):return jsonify(ok=False,erro="GPS da origem inválido. Ative sua localização."),400
-    destino=str(d.get("destino","")).strip()
-    if len(destino)<3:return jsonify(ok=False,erro="Digite um destino válido."),400
-    try:
-        rota=rota_destino(lat,lon,destino)
-    except Exception:
-        return jsonify(ok=False,erro="Não consegui localizar o destino. Confira o endereço e sua internet."),400
-    if not rota:return jsonify(ok=False,erro="Destino não encontrado. Digite endereço completo, com bairro/cidade."),400
-    total,taxa,mot=calcular_valores(rota["distancia_km"])
-    rota.update(ok=True,valor=total,taxa_admin=taxa,valor_motorista=mot,preco_km=PRECO_KM,taxa_admin_percent=TAXA_ADMIN*100)
-    return jsonify(rota)
+    <div class="grid">
+        <div class="stat">
+            <div class="titulo">🏍️ Motoqueiros</div>
+            <div class="numero">{total} / {LIMITE_MOTOQUEIROS}</div>
+            <p>{aprovados} aprovados</p>
+            <p>{pendentes} pendentes</p>
+        </div>
 
+        <div class="stat">
+            <div class="titulo">🟢 Online</div>
+            <div class="numero">{online}</div>
+            <p>Motoqueiros conectados</p>
+        </div>
 
-@app.route("/api/solicitar-corrida", methods=["POST"])
-def api_solicitar_corrida():
-    u=usuario_logado()
-    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Faça login como passageiro."),401
-    d=request.get_json(silent=True) or {}
-    try:
-        lat=float(d.get("latitude_partida"));lon=float(d.get("longitude_partida"));lat2=float(d.get("latitude_destino"));lon2=float(d.get("longitude_destino"));dist=float(d.get("distancia_km"));valor=float(d.get("valor"))
-    except (TypeError,ValueError):return jsonify(ok=False,erro="Dados da corrida inválidos."),400
-    if not(-90<=lat<=90 and -180<=lon<=180 and -90<=lat2<=90 and -180<=lon2<=180):return jsonify(ok=False,erro="Coordenadas inválidas."),400
-    if dist<=0 or valor<=0:return jsonify(ok=False,erro="Distância ou valor inválido."),400
-    partida=str(d.get("partida","")).strip();destino=str(d.get("destino","")).strip()
-    if not partida or not destino:return jsonify(ok=False,erro="Origem e destino são obrigatórios."),400
-    # Recalcula no servidor para o passageiro não poder alterar a tarifa pelo navegador.
-    total,taxa,mot=calcular_valores(dist)
-    con=conectar()
-    try:
-        # Evita duas corridas simultâneas do mesmo passageiro.
-        ativa=con.execute("SELECT id FROM corridas_vai WHERE passageiro_id=? AND status IN ('PENDENTE','ACEITA','EM_ANDAMENTO') LIMIT 1",(u["id"],)).fetchone()
-        if ativa:return jsonify(ok=False,erro="Você já possui uma corrida ativa."),409
-        cur=con.execute("""
-INSERT INTO corridas_vai(
-passageiro_id,partida,destino,valor,status,motorista_id,
-latitude_partida,longitude_partida,latitude_destino,longitude_destino,
-distancia_km,preco_km,taxa_admin_percent,taxa_admin,valor_motorista,criada_em
-)
-VALUES(?,?,?,?,'PENDENTE',NULL,?,?,?,?,?,?,?,?,?,?)
-""",(
-u["id"],partida,destino,total,
-lat,lon,lat2,lon2,dist,PRECO_KM,
-TAXA_ADMIN*100,taxa,mot,time.time()
-))
-        
-        con.commit()
-        rid=cur.lastrowid
-        row=con.execute("SELECT * FROM corridas_vai WHERE id=?",(rid,)).fetchone()
-        return jsonify(ok=True,corrida=dict(row))
-        
-    finally:
-        con.close()
- 
+        <div class="stat">
+            <div class="titulo">👥 Passageiros</div>
+            <div class="numero">{passageiros_total}</div>
+            <p>Passageiros cadastrados</p>
+        </div>
 
+        <div class="stat">
+            <div class="titulo">🚕 Corridas</div>
+            <div class="numero">0</div>
+        </div>
+    </div>
 
-@app.route("/api/passageiro/localizacao",methods=["POST"])
-def api_passageiro_localizacao():
-    u=usuario_logado()
-    if not u or u["tipo"]!="passageiro":return jsonify(ok=False,erro="Acesso negado."),401
-    d=request.get_json(silent=True) or {}
-    try:lat=float(d.get("latitude"));lon=float(d.get("longitude"));assert -90<=lat<=90 and -180<=lon<=180
-    except (TypeError,ValueError,AssertionError):return jsonify(ok=False,erro="Coordenadas inválidas."),400
-    con=conectar();row=con.execute("SELECT id FROM corridas_vai WHERE passageiro_id=? AND status IN ('PENDENTE','ACEITA','EM_ANDAMENTO') ORDER BY id DESC LIMIT 1",(u["id"],)).fetchone()
-    if row:con.execute("UPDATE corridas_vai SET latitude_partida=?,longitude_partida=? WHERE id=?",(lat,lon,row["id"]));con.commit()
-    con.close();return jsonify(ok=True,latitude=lat,longitude=lon)
+    <div class="card">
+        <h2>🏍️ Gerenciar motoqueiros</h2>
+        <p>Cadastre e aprove os motoqueiros pelo painel.</p>
+        <a class="btn btn-azul" href="{url_for('motoqueiros')}">
+            ABRIR MOTOQUEIROS
+        </a>
+    </div>
 
-
-@app.route("/api/minhas-corridas")
-def api_minhas_corridas():
-    u=usuario_logado()
-    if not u:return jsonify(corridas=[]),401
-    con=conectar();rows=con.execute("""
-      SELECT c.*,m.nome motorista_nome,m.whatsapp motorista_whatsapp,m.latitude motorista_lat,m.longitude motorista_lon,m.location_seen motorista_location_seen
-      FROM corridas_vai c LEFT JOIN usuarios_vai m ON m.id=c.motorista_id
-      WHERE c.passageiro_id=? ORDER BY c.id DESC
-    """,(u["id"],)).fetchall();con.close()
-    out=[]
-    for r in rows:
-        d=dict(r)
-        if d.get("motorista_location_seen") and time.time()-d["motorista_location_seen"]>LOCATION_TIMEOUT:d["motorista_lat"]=None;d["motorista_lon"]=None
-        out.append(d)
-    return jsonify(corridas=out)
-
-
-@app.route("/api/corrida/<int:corrida_id>/cancelar",methods=["POST"])
-def cancelar_corrida(corrida_id):
-    u=usuario_logado()
-    if not u:return jsonify(ok=False,erro="Faça login novamente."),401
-    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='CANCELADA',cancelada_em=? WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','ACEITA')",(time.time(),corrida_id,u["id"]));con.commit();con.close()
-    return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "Esta corrida não pode mais ser cancelada.")
-
-
-# ============================================================
-# MOTORISTA
-# ============================================================
-@app.route("/motorista")
-def motorista():
-    u=usuario_logado()
-    if not u:return redirect(url_for("login"))
-    if u["tipo"]!="motorista":return "Acesso permitido somente para motoristas.",403
-    marcar_motoristas_expirados();u=usuario_logado()
-    return render_template_string(MOTORISTA,usuario=u,poll=POLL_MOTORISTA)
-
-
-@app.route("/api/motorista/status",methods=["POST"])
-def api_motorista_status():
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
-    d=request.get_json(silent=True) or {};online=1 if d.get("online") else 0
-    con=conectar();now=time.time()
-    if online:con.execute("UPDATE usuarios_vai SET online=1,last_seen=? WHERE id=?",(now,u["id"]))
-    else:con.execute("UPDATE usuarios_vai SET online=0,last_seen=0,latitude=NULL,longitude=NULL,location_seen=0 WHERE id=?",(u["id"],))
-    con.commit();con.close();return jsonify(ok=True,online=bool(online),online_total=contar_motoristas_online())
-
-
-@app.route("/api/motorista/heartbeat",methods=["POST"])
-def api_motorista_heartbeat():
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False),401
-    con=conectar();con.execute("UPDATE usuarios_vai SET last_seen=? WHERE id=? AND online=1",(time.time(),u["id"]));con.commit();con.close();return jsonify(ok=True)
-
-
-@app.route("/api/motorista/localizacao",methods=["POST"])
-def api_motorista_localizacao():
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
-    d=request.get_json(silent=True) or {}
-    try:lat=float(d.get("latitude"));lon=float(d.get("longitude"));assert -90<=lat<=90 and -180<=lon<=180
-    except (TypeError,ValueError,AssertionError):return jsonify(ok=False,erro="Coordenadas inválidas."),400
-    now=time.time();con=conectar();r=con.execute("UPDATE usuarios_vai SET latitude=?,longitude=?,location_seen=?,last_seen=? WHERE id=? AND online=1",(lat,lon,now,now,u["id"]));con.commit();con.close()
-    return jsonify(ok=r.rowcount==1,latitude=lat,longitude=lon)
-
-
-@app.route("/api/motoristas-online")
-def api_motoristas_online():return jsonify(online=contar_motoristas_online())
-
-
-@app.route("/api/corridas-disponiveis")
-def api_corridas_disponiveis():
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(corridas=[]),401
-    marcar_motoristas_expirados();expirar_corridas_antigas();con=conectar();rows=con.execute("""
-      SELECT c.id,c.partida,c.destino,c.valor,c.latitude_partida,c.longitude_partida,c.latitude_destino,c.longitude_destino,c.distancia_km,c.taxa_admin,c.valor_motorista,c.criada_em
-      FROM corridas_vai c WHERE c.status='PENDENTE' ORDER BY c.id ASC
-    """).fetchall();con.close();return jsonify(corridas=[dict(r) for r in rows])
-
-
-@app.route("/api/minha-corrida-motorista")
-def api_minha_corrida_motorista():
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(corrida=None),401
-    con=conectar();r=con.execute("""
-      SELECT c.*,p.nome passageiro_nome,p.whatsapp passageiro_whatsapp
-      FROM corridas_vai c JOIN usuarios_vai p ON p.id=c.passageiro_id
-      WHERE c.motorista_id=? AND c.status IN ('ACEITA','EM_ANDAMENTO') ORDER BY c.id DESC LIMIT 1
-    """,(u["id"],)).fetchone();con.close();return jsonify(corrida=dict(r) if r else None)
-
-
-@app.route("/api/corrida/<int:corrida_id>/aceitar",methods=["POST"])
-def aceitar_corrida(corrida_id):
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
-    marcar_motoristas_expirados();con=conectar();mot=con.execute("SELECT online FROM usuarios_vai WHERE id=? AND tipo='motorista'",(u["id"],)).fetchone()
-    if not mot or not mot["online"]:con.close();return jsonify(ok=False,erro="Você precisa estar online para aceitar."),400
-    # Um motorista não pega duas corridas ao mesmo tempo.
-    ativa=con.execute("SELECT id FROM corridas_vai WHERE motorista_id=? AND status IN ('ACEITA','EM_ANDAMENTO') LIMIT 1",(u["id"],)).fetchone()
-    if ativa:con.close();return jsonify(ok=False,erro="Você já possui uma corrida ativa."),409
-    cur=con.execute("UPDATE corridas_vai SET status='ACEITA',motorista_id=?,aceita_em=? WHERE id=? AND status='PENDENTE' AND motorista_id IS NULL",(u["id"],time.time(),corrida_id))
-    if cur.rowcount!=1:con.rollback();con.close();return jsonify(ok=False,erro="Essa corrida já foi aceita por outro motorista."),409
-    con.commit();r=con.execute("SELECT * FROM corridas_vai WHERE id=?",(corrida_id,)).fetchone();con.close();return jsonify(ok=True,corrida=dict(r))
-
-
-@app.route("/api/corrida/<int:corrida_id>/iniciar",methods=["POST"])
-def iniciar_corrida(corrida_id):
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
-    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='EM_ANDAMENTO',iniciada_em=? WHERE id=? AND motorista_id=? AND status='ACEITA'",(time.time(),corrida_id,u["id"]));con.commit();con.close();return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "A corrida não está disponível para iniciar.")
-
-
-@app.route("/api/corrida/<int:corrida_id>/concluir",methods=["POST"])
-def concluir_corrida(corrida_id):
-    u=usuario_logado()
-    if not u or u["tipo"]!="motorista":return jsonify(ok=False,erro="Acesso negado."),401
-    con=conectar();cur=con.execute("UPDATE corridas_vai SET status='CONCLUIDA',concluida_em=? WHERE id=? AND motorista_id=? AND status='EM_ANDAMENTO'",(time.time(),corrida_id,u["id"]));con.commit();con.close();return jsonify(ok=cur.rowcount==1,erro=None if cur.rowcount==1 else "A corrida não está em andamento.")
-
-
-# ============================================================
-# ADMIN - resumo financeiro das corridas
-# ============================================================
-@app.route("/admin")
-def admin():
-    if request.args.get("key")!=ADMIN_KEY:return "Acesso negado.",403
-    con=conectar();tot=con.execute("""
-      SELECT COUNT(*) corridas,
-             COALESCE(SUM(valor),0) faturamento,
-             COALESCE(SUM(taxa_admin),0) taxa_admin,
-             COALESCE(SUM(valor_motorista),0) motorista
-      FROM corridas_vai WHERE status='CONCLUIDA'
-    """).fetchone();ult=con.execute("""
-      SELECT c.id,c.partida,c.destino,c.valor,c.taxa_admin,c.valor_motorista,c.status,c.distancia_km,c.criada_em,p.nome passageiro_nome,m.nome motorista_nome
-      FROM corridas_vai c JOIN usuarios_vai p ON p.id=c.passageiro_id LEFT JOIN usuarios_vai m ON m.id=c.motorista_id
-      ORDER BY c.id DESC LIMIT 50
-    """).fetchall();con.close()
-    html=CSS+"""
-    <div class="card"><h1>📊 VaiMoto Admin</h1>
-    <div class="row"><div class="money"><b>Corridas concluídas</b><div class="price">{{ t['corridas'] }}</div></div><div class="money"><b>Faturamento</b><div class="price">R$ {{ '%.2f'|format(t['faturamento']) }}</div></div></div>
-    <div class="row"><div class="money"><b>🏢 Taxas do app (8%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (92%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
-    <h2>Últimas corridas</h2>{% for c in ult %}<div class="ride"><b>#{{c['id']}}</b> {{c['status']}}<br>{{c['passageiro_nome']}} → {{c['motorista_nome'] or 'sem motorista'}}<br>{{c['partida']}} → {{c['destino']}}<br>R$ {{'%.2f'|format(c['valor'])}} • App R$ {{'%.2f'|format(c['taxa_admin'] or 0)}} • Motorista R$ {{'%.2f'|format(c['valor_motorista'] or 0)}}</div>{% else %}<div class="box">Nenhuma corrida.</div>{% endfor %}</div>
+    <div class="card">
+        <h2>👥 Gerenciar passageiros</h2>
+        <p>Cadastre e gerencie os passageiros.</p>
+        <a class="btn btn-azul" href="{url_for('passageiros')}">
+            ABRIR PASSAGEIROS
+        </a>
+    </div>
     """
-    return render_template_string(html,t=tot,ult=ult)
 
+    return pagina(html)
+
+
+@app.route("/motoqueiros", methods=["GET", "POST"])
+@login_obrigatorio
+def motoqueiros():
+    if request.method == "POST":
+        conn = conectar()
+
+        total = conn.execute(
+            "SELECT COUNT(*) AS n FROM motoqueiros"
+        ).fetchone()["n"]
+
+        if total >= LIMITE_MOTOQUEIROS:
+            conn.close()
+            flash("Limite de 20 motoqueiros atingido.", "erro")
+            return redirect(url_for("motoqueiros"))
+
+        nome = request.form.get("nome", "").strip()
+        telefone = request.form.get("telefone", "").strip()
+        cpf = request.form.get("cpf", "").strip()
+        moto = request.form.get("moto", "").strip()
+        placa = request.form.get("placa", "").strip().upper()
+        localizacao = request.form.get("localizacao", "").strip()
+        observacao = request.form.get("observacao", "").strip()
+
+        if not all([nome, telefone, cpf, moto, placa, localizacao]):
+            conn.close()
+            flash("Preencha todos os campos obrigatórios.", "erro")
+            return redirect(url_for("motoqueiros"))
+
+        conn.execute("""
+            INSERT INTO motoqueiros
+            (nome, telefone, cpf, moto, placa, localizacao, observacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            nome, telefone, cpf, moto, placa, localizacao, observacao
+        ))
+
+        conn.commit()
+        conn.close()
+
+        flash("Motoqueiro cadastrado com sucesso. Aguardando aprovação.", "sucesso")
+        return redirect(url_for("motoqueiros"))
+
+    conn = conectar()
+    lista = conn.execute(
+        "SELECT * FROM motoqueiros ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+
+    linhas = ""
+
+    for m in lista:
+        status_class = m["status"]
+        conexao_class = m["conexao"]
+
+        if m["status"] == "aprovado":
+            status_texto = "APROVADO"
+        elif m["status"] == "reprovado":
+            status_texto = "REPROVADO"
+        else:
+            status_texto = "PENDENTE"
+
+        conexao_texto = "ONLINE" if m["conexao"] == "online" else "OFFLINE"
+
+        linhas += f"""
+        <tr>
+            <td>{m["id"]}</td>
+            <td><b>{m["nome"]}</b></td>
+            <td>{m["telefone"]}</td>
+            <td>{m["cpf"]}</td>
+            <td>{m["moto"]}<br><b>{m["placa"]}</b></td>
+            <td>{m["localizacao"]}</td>
+            <td>
+                <span class="badge {status_class}">
+                    {status_texto}
+                </span>
+            </td>
+            <td>
+                <span class="badge {conexao_class}">
+                    {conexao_texto}
+                </span>
+            </td>
+            <td>
+                {m["observacao"] or "-"}
+            </td>
+            <td>
+                <a class="btn btn-verde"
+                   href="{url_for('alterar_status', id=m['id'], status='aprovado')}">
+                   Aprovar
+                </a>
+
+                <a class="btn btn-vermelho"
+                   href="{url_for('alterar_status', id=m['id'], status='reprovado')}">
+                   Reprovar
+                </a>
+
+                <a class="btn btn-azul"
+                   href="{url_for('alterar_conexao', id=m['id'], conexao='online')}">
+                   Online
+                </a>
+
+                <a class="btn btn-cinza"
+                   href="{url_for('alterar_conexao', id=m['id'], conexao='offline')}">
+                   Offline
+                </a>
+
+                <a class="btn btn-vermelho"
+                   href="{url_for('excluir_motoqueiro', id=m['id'])}"
+                   onclick="return confirm('Excluir este motoqueiro?')">
+                   Excluir
+                </a>
+            </td>
+        </tr>
+        """
+
+    if not linhas:
+        linhas = """
+        <tr>
+            <td colspan="10" style="text-align:center">
+                Nenhum motoqueiro cadastrado.
+            </td>
+        </tr>
+        """
+
+    html = f"""
+    <h1>🏍️ Motoqueiros</h1>
+
+    <div class="card">
+        <h2>➕ Cadastrar motoqueiro</h2>
+        <p>Campos com * são obrigatórios.</p>
+
+        <form method="post">
+            <label>Nome *</label>
+            <input name="nome" placeholder="Nome completo" required>
+
+            <label>Telefone *</label>
+            <input name="telefone" placeholder="(62) 99999-9999" required>
+
+            <label>CPF *</label>
+            <input name="cpf" placeholder="000.000.000-00" required>
+
+            <label>Modelo da moto *</label>
+            <input name="moto" placeholder="Ex.: Honda CG 160" required>
+
+            <label>Placa *</label>
+            <input name="placa" placeholder="ABC1D23" required>
+
+            <label>Localização *</label>
+            <input name="localizacao" placeholder="Cidade / bairro" required>
+
+            <label>Observação</label>
+            <textarea name="observacao"
+                placeholder="Ex.: documento pendente, observação administrativa..."></textarea>
+
+            <button type="submit">
+                🏍️ CADASTRAR MOTOQUEIRO
+            </button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📋 Motoqueiros cadastrados</h2>
+        <p><b>Total:</b> {len(lista)} / {LIMITE_MOTOQUEIROS}</p>
+
+        <div class="tabela">
+        <table>
+            <tr>
+                <th>ID</th>
+                <th>Nome</th>
+                <th>Telefone</th>
+                <th>CPF</th>
+                <th>Moto / Placa</th>
+                <th>Localização</th>
+                <th>Status</th>
+                <th>Conexão</th>
+                <th>Observação</th>
+                <th>Ações</th>
+            </tr>
+            {linhas}
+        </table>
+        </div>
+    </div>
+    """
+
+    return pagina(html)
+
+
+@app.route("/passageiros", methods=["GET", "POST"])
+@login_obrigatorio
+def passageiros():
+    if request.method == "POST":
+        conn = conectar()
+
+        nome = request.form.get("nome", "").strip()
+        telefone = request.form.get("telefone", "").strip()
+        cpf = request.form.get("cpf", "").strip()
+        localizacao = request.form.get("localizacao", "").strip()
+        observacao = request.form.get("observacao", "").strip()
+
+        if not all([nome, telefone, cpf, localizacao]):
+            conn.close()
+            flash("Preencha todos os campos obrigatórios.", "erro")
+            return redirect(url_for("passageiros"))
+
+        conn.execute("""
+            INSERT INTO passageiros
+            (nome, telefone, cpf, localizacao, observacao)
+            VALUES (?, ?, ?, ?, ?)
+        """, (
+            nome, telefone, cpf, localizacao, observacao
+        ))
+
+        conn.commit()
+        conn.close()
+
+        flash("Passageiro cadastrado com sucesso.", "sucesso")
+        return redirect(url_for("passageiros"))
+
+    conn = conectar()
+
+    lista = conn.execute("""
+        SELECT * FROM passageiros
+        ORDER BY id DESC
+    """).fetchall()
+
+    conn.close()
+
+    linhas = ""
+
+    for p in lista:
+        status = p["status"] if "status" in p.keys() else "ativo"
+        status_texto = "ATIVO" if status == "ativo" else "BLOQUEADO"
+        status_class = "aprovado" if status == "ativo" else "reprovado"
+
+        linhas += f"""
+        <tr>
+            <td>{p["id"]}</td>
+            <td><b>{p["nome"]}</b></td>
+            <td>{p["telefone"]}</td>
+            <td>{p["cpf"]}</td>
+            <td>{p["localizacao"]}</td>
+            <td>{p["observacao"] or "-"}</td>
+
+            <td>
+                <span class="badge {status_class}">
+                    {status_texto}
+                </span>
+            </td>
+
+            <td>
+                <a class="btn btn-verde"
+                   href="{url_for('alterar_status_passageiro', id=p['id'], status='ativo')}">
+                   Ativar
+                </a>
+
+                <a class="btn btn-vermelho"
+                   href="{url_for('alterar_status_passageiro', id=p['id'], status='bloqueado')}">
+                   Bloquear
+                </a>
+
+                <a class="btn btn-vermelho"
+                   href="{url_for('excluir_passageiro', id=p['id'])}"
+                   onclick="return confirm('Excluir este passageiro?')">
+                   Excluir
+                </a>
+            </td>
+        </tr>
+        """
+
+    if not linhas:
+        linhas = """
+        <tr>
+            <td colspan="8" style="text-align:center">
+                Nenhum passageiro cadastrado.
+            </td>
+        </tr>
+        """
+
+    html = f"""
+    <h1>👥 Passageiros</h1>
+
+    <div class="card">
+        <h2>➕ Cadastrar passageiro</h2>
+        <p>Campos com * são obrigatórios.</p>
+
+        <form method="post">
+
+            <label>Nome *</label>
+            <input
+                name="nome"
+                placeholder="Nome completo"
+                required
+            >
+
+            <label>Telefone *</label>
+            <input
+                name="telefone"
+                placeholder="(62) 99999-9999"
+                required
+            >
+
+            <label>CPF *</label>
+            <input
+                name="cpf"
+                placeholder="000.000.000-00"
+                required
+            >
+
+            <label>Localização *</label>
+            <input
+                name="localizacao"
+                placeholder="Cidade / bairro"
+                required
+            >
+
+            <label>Observação</label>
+            <textarea
+                name="observacao"
+                placeholder="Observação do passageiro..."
+            ></textarea>
+
+            <button type="submit">
+                👥 CADASTRAR PASSAGEIRO
+            </button>
+
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📋 Passageiros cadastrados</h2>
+
+        <p>
+            <b>Total:</b> {len(lista)}
+        </p>
+
+        <div class="tabela">
+            <table>
+
+                <tr>
+                    <th>ID</th>
+                    <th>Nome</th>
+                    <th>Telefone</th>
+                    <th>CPF</th>
+                    <th>Localização</th>
+                    <th>Observação</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+
+                {linhas}
+
+            </table>
+        </div>
+    </div>
+    """
+
+    return pagina(html)
+
+
+@app.route("/passageiros/status/<int:id>/<status>")
+@login_obrigatorio
+def alterar_status_passageiro(id, status):
+
+    if status not in ("ativo", "bloqueado"):
+        flash("Status de passageiro inválido.", "erro")
+        return redirect(url_for("passageiros"))
+
+    conn = conectar()
+
+    conn.execute(
+        "UPDATE passageiros SET status=? WHERE id=?",
+        (status, id)
+    )
+
+    conn.commit()
+    conn.close()
+
+    flash("Status do passageiro atualizado.", "sucesso")
+
+    return redirect(url_for("passageiros"))
+
+
+@app.route("/passageiros/excluir/<int:id>")
+@login_obrigatorio
+def excluir_passageiro(id):
+
+    conn = conectar()
+
+    conn.execute(
+        "DELETE FROM passageiros WHERE id=?",
+        (id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    flash("Passageiro excluído.", "sucesso")
+
+    return redirect(url_for("passageiros"))
+
+
+
+@app.route("/motoqueiros/status/<int:id>/<status>")
+@login_obrigatorio
+def alterar_status(id, status):
+    if status not in ("aprovado", "reprovado", "pendente"):
+        flash("Status inválido.", "erro")
+        return redirect(url_for("motoqueiros"))
+
+    conn = conectar()
+    conn.execute(
+        "UPDATE motoqueiros SET status=? WHERE id=?",
+        (status, id)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Status atualizado.", "sucesso")
+    return redirect(url_for("motoqueiros"))
+
+
+@app.route("/motoqueiros/conexao/<int:id>/<conexao>")
+@login_obrigatorio
+def alterar_conexao(id, conexao):
+    if conexao not in ("online", "offline"):
+        flash("Conexão inválida.", "erro")
+        return redirect(url_for("motoqueiros"))
+
+    conn = conectar()
+    conn.execute(
+        "UPDATE motoqueiros SET conexao=? WHERE id=?",
+        (conexao, id)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Conexão atualizada.", "sucesso")
+    return redirect(url_for("motoqueiros"))
+
+
+@app.route("/motoqueiros/excluir/<int:id>")
+@login_obrigatorio
+def excluir_motoqueiro(id):
+    conn = conectar()
+    conn.execute(
+        "DELETE FROM motoqueiros WHERE id=?",
+        (id,)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Motoqueiro excluído.", "sucesso")
+    return redirect(url_for("motoqueiros"))
 
 # ============================================================
-# ERROS
+# ADMIN - CORRIDAS
 # ============================================================
-@app.errorhandler(404)
-def not_found(e):return "Página não encontrada.",404
+
+@app.route("/corridas")
+@login_obrigatorio
+def corridas():
+    filtro = request.args.get("status", "TODAS").upper()
+
+    status_validos = {
+        "TODAS": None,
+        "PENDENTE": "PENDENTE",
+        "EM_ANDAMENTO": "EM_ANDAMENTO",
+        "CONCLUIDA": "CONCLUIDA",
+        "CANCELADA": "CANCELADA"
+    }
+
+    if filtro not in status_validos:
+        filtro = "TODAS"
+
+    conn = conectar()
+
+    if status_validos[filtro]:
+        corridas_lista = conn.execute("""
+            SELECT
+                c.*,
+                p.nome AS passageiro_nome,
+                p.telefone AS passageiro_telefone,
+                m.nome AS motorista_nome,
+                m.telefone AS motorista_telefone
+            FROM corridas_vai c
+            LEFT JOIN passageiros p
+                ON p.id = c.passageiro_id
+            LEFT JOIN passageiros m
+                ON m.id = c.motorista_id
+            WHERE c.status = ?
+            ORDER BY c.id DESC
+        """, (status_validos[filtro],)).fetchall()
+    else:
+        corridas_lista = conn.execute("""
+            SELECT
+                c.*,
+                p.nome AS passageiro_nome,
+                p.telefone AS passageiro_telefone,
+                m.nome AS motorista_nome,
+                m.telefone AS motorista_telefone
+            FROM corridas_vai c
+            LEFT JOIN passageiros p
+                ON p.id = c.passageiro_id
+            LEFT JOIN motoqueiros m
+                ON m.id = c.motorista_id
+            ORDER BY c.id DESC
+        """).fetchall()
+
+    conn.close()
+
+    def classe_status(status):
+        status = (status or "").upper()
+
+        if status == "PENDENTE":
+            return "status-pendente"
+
+        if status in ("ACEITA", "EM_ANDAMENTO"):
+            return "status-andamento"
+
+        if status == "CONCLUIDA":
+            return "status-concluida"
+
+        if status == "CANCELADA":
+            return "status-cancelada"
+
+        return "status-outro"
+
+    def texto_status(status):
+        status = (status or "").upper()
+
+        nomes = {
+            "PENDENTE": "PENDENTE",
+            "ACEITA": "ACEITA",
+            "EM_ANDAMENTO": "EM ANDAMENTO",
+            "CONCLUIDA": "CONCLUÍDA",
+            "CANCELADA": "CANCELADA"
+        }
+
+        return nomes.get(status, status)
+
+    cards = ""
+
+    for c in corridas_lista:
+
+        status = c["status"] or "PENDENTE"
+
+        passageiro = c["passageiro_nome"] or "Não informado"
+        motorista = c["motorista_nome"] or "Ainda não definido"
+
+        partida = c["partida"] or "-"
+        destino = c["destino"] or "-"
+
+        try:
+            valor = float(c["valor"] or 0)
+        except:
+            valor = 0
+
+        botoes = f"""
+        <a class="btn btn-azul"
+           href="{url_for('corrida_detalhes', id=c['id'])}">
+           👁️ VER DETALHES
+        </a>
+        """
+
+        if status == "PENDENTE":
+            botoes += f"""
+            <a class="btn btn-verde"
+               href="{url_for('admin_corrida_status',
+                              id=c['id'],
+                              status='ACEITA')}">
+               🟢 ACEITAR
+            </a>
+            """
+
+        elif status == "ACEITA":
+            botoes += f"""
+            <a class="btn btn-verde"
+               href="{url_for('admin_corrida_status',
+                              id=c['id'],
+                              status='EM_ANDAMENTO')}">
+               🚦 INICIAR
+            </a>
+            """
+
+        elif status == "EM_ANDAMENTO":
+            botoes += f"""
+            <a class="btn btn-verde"
+               href="{url_for('admin_corrida_status',
+                              id=c['id'],
+                              status='CONCLUIDA')}">
+               ✅ CONCLUIR
+            </a>
+            """
+
+        if status in ("PENDENTE", "ACEITA", "EM_ANDAMENTO"):
+            botoes += f"""
+            <a class="btn btn-vermelho"
+               href="{url_for('admin_corrida_status',
+                              id=c['id'],
+                              status='CANCELADA')}"
+               onclick="return confirm('Cancelar esta corrida?')">
+               🔴 CANCELAR
+            </a>
+            """
+
+        botoes += f"""
+        <a class="btn btn-vermelho"
+           href="{url_for('excluir_corrida',
+                          id=c['id'])}"
+           onclick="return confirm('Excluir esta corrida definitivamente?')">
+           🗑️ EXCLUIR
+        </a>
+        """
+
+        cards += f"""
+        <div class="corrida-card">
+
+            <div class="corrida-topo">
+                <strong>🚕 CORRIDA #{c['id']}</strong>
+
+                <span class="badge-corrida {classe_status(status)}">
+                    {texto_status(status)}
+                </span>
+            </div>
+
+            <div class="corrida-info">
+                <p>👤 <b>Passageiro:</b> {passageiro}</p>
+
+                <p>🏍️ <b>Motoqueiro:</b> {motorista}</p>
+
+                <p>📍 <b>Origem:</b> {partida}</p>
+
+                <p>🏁 <b>Destino:</b> {destino}</p>
+
+                <p>💰 <b>Valor:</b>
+                    R$ {valor:.2f}
+                </p>
+            </div>
+
+            <div class="corrida-acoes">
+                {botoes}
+            </div>
+
+        </div>
+        """
+
+    if not cards:
+        cards = """
+        <div class="card">
+            <h2>🚕 Nenhuma corrida encontrada</h2>
+            <p>Não existem corridas neste filtro.</p>
+        </div>
+        """
+
+    html = f"""
+    <style>
+
+    .filtros-corridas {{
+        display:flex;
+        gap:8px;
+        flex-wrap:wrap;
+        margin-bottom:20px;
+    }}
+
+    .filtro-corrida {{
+        display:inline-block;
+        padding:12px 16px;
+        border-radius:12px;
+        background:#eee;
+        color:#222;
+        text-decoration:none;
+        font-weight:bold;
+    }}
+
+    .filtro-corrida.ativo {{
+        background:#111;
+        color:#fff;
+    }}
+
+    .corridas-desktop {{
+        display:block;
+    }}
+
+    .corridas-mobile {{
+        display:none;
+    }}
+
+    .corrida-card {{
+        background:#fff;
+        border-radius:18px;
+        padding:20px;
+        margin-bottom:16px;
+        box-shadow:0 2px 10px rgba(0,0,0,.08);
+    }}
+
+    .corrida-topo {{
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:10px;
+        border-bottom:1px solid #eee;
+        padding-bottom:14px;
+        margin-bottom:14px;
+    }}
+
+    .badge-corrida {{
+        display:inline-block;
+        padding:7px 10px;
+        border-radius:20px;
+        font-weight:bold;
+        font-size:13px;
+    }}
+
+    .status-pendente {{
+        background:#fff3cd;
+        color:#664d03;
+    }}
+
+    .status-andamento {{
+        background:#cfe2ff;
+        color:#084298;
+    }}
+
+    .status-concluida {{
+        background:#d1e7dd;
+        color:#0f5132;
+    }}
+
+    .status-cancelada {{
+        background:#f8d7da;
+        color:#842029;
+    }}
+
+    .status-outro {{
+        background:#eee;
+        color:#333;
+    }}
+
+    .corrida-info p {{
+        margin:9px 0;
+        font-size:16px;
+    }}
+
+    .corrida-acoes {{
+        margin-top:16px;
+        display:flex;
+        flex-wrap:wrap;
+        gap:5px;
+    }}
+
+    .corrida-acoes .btn {{
+        margin:0;
+    }}
+
+    .tabela-corridas {{
+        overflow-x:auto;
+    }}
+
+    .tabela-corridas table {{
+        min-width:1050px;
+    }}
+
+    @media(max-width:700px) {{
+
+        .corridas-desktop {{
+            display:none;
+        }}
+
+        .corridas-mobile {{
+            display:block;
+        }}
+
+        .filtros-corridas {{
+            display:grid;
+            grid-template-columns:1fr 1fr;
+        }}
+
+        .filtro-corrida {{
+            text-align:center;
+            padding:13px 8px;
+        }}
+
+        .filtro-corrida:first-child {{
+            grid-column:1 / -1;
+        }}
+
+        .corrida-topo {{
+            align-items:flex-start;
+            flex-direction:column;
+        }}
+
+        .corrida-acoes {{
+            display:grid;
+            grid-template-columns:1fr;
+        }}
+
+        .corrida-acoes .btn {{
+            width:100%;
+            text-align:center;
+            padding:14px 10px;
+        }}
+    }}
+
+    </style>
+
+    <h1>🚕 Corridas</h1>
+
+    <div class="card">
+
+        <h2>🔎 Filtrar corridas</h2>
+
+        <div class="filtros-corridas">
+
+            <a class="filtro-corrida {'ativo' if filtro == 'TODAS' else ''}"
+               href="{url_for('corridas', status='TODAS')}">
+               TODAS
+            </a>
+
+            <a class="filtro-corrida {'ativo' if filtro == 'PENDENTE' else ''}"
+               href="{url_for('corridas', status='PENDENTE')}">
+               🟡 PENDENTES
+            </a>
+
+            <a class="filtro-corrida {'ativo' if filtro == 'EM_ANDAMENTO' else ''}"
+               href="{url_for('corridas', status='EM_ANDAMENTO')}">
+               🚦 EM ANDAMENTO
+            </a>
+
+            <a class="filtro-corrida {'ativo' if filtro == 'CONCLUIDA' else ''}"
+               href="{url_for('corridas', status='CONCLUIDA')}">
+               🟢 CONCLUÍDAS
+            </a>
+
+            <a class="filtro-corrida {'ativo' if filtro == 'CANCELADA' else ''}"
+               href="{url_for('corridas', status='CANCELADA')}">
+               🔴 CANCELADAS
+            </a>
+
+        </div>
+
+        <p>
+            <b>Total exibido:</b> {len(corridas_lista)}
+        </p>
+
+    </div>
+
+    <!-- CELULAR -->
+    <div class="corridas-mobile">
+        {cards}
+    </div>
+
+    <!-- COMPUTADOR -->
+    <div class="corridas-desktop">
+
+        <div class="card">
+
+            <h2>📋 Lista de corridas</h2>
+
+            <div class="tabela-corridas">
+
+                <table>
+
+                    <tr>
+                        <th>ID</th>
+                        <th>Passageiro</th>
+                        <th>Motoqueiro</th>
+                        <th>Origem</th>
+                        <th>Destino</th>
+                        <th>Valor</th>
+                        <th>Status</th>
+                        <th>Ações</th>
+                    </tr>
+
+                    {''.join(f'''
+                    <tr>
+                        <td><b>#{c["id"]}</b></td>
+
+                        <td>
+                            {c["passageiro_nome"] or "Não informado"}
+                        </td>
+
+                        <td>
+                            {c["motorista_nome"] or "Não definido"}
+                        </td>
+
+                        <td>
+                            {c["partida"] or "-"}
+                        </td>
+
+                        <td>
+                            {c["destino"] or "-"}
+                        </td>
+
+                        <td>
+                            R$ {float(c["valor"] or 0):.2f}
+                        </td>
+
+                        <td>
+                            <span class="badge-corrida {classe_status(c["status"])}">
+                                {texto_status(c["status"])}
+                            </span>
+                        </td>
+
+                        <td>
+                            <a class="btn btn-azul"
+                               href="{url_for("corrida_detalhes", id=c["id"])}">
+                               Ver
+                            </a>
+
+                            <a class="btn btn-vermelho"
+                               href="{url_for("excluir_corrida", id=c["id"])}"
+                               onclick="return confirm("Excluir esta corrida?")">
+                               Excluir
+                            </a>
+                        </td>
+                    </tr>
+                    ''' for c in corridas_lista)}
+
+                </table>
+
+            </div>
+
+        </div>
+
+    </div>
+    """
+
+    return pagina(html)
 
 
-if __name__=="__main__":
-    inicializar_banco()
-    expirar_corridas_antigas()
-    print("="*60)
-    print("🏍️ VAIMOTO V10 INICIADO")
-    print("="*60)
-    print(f"Banco: {DB}")
-    print("Local: http://127.0.0.1:5000")
-    print("Rede:  http://0.0.0.0:5000")
-    print("Tarifa: R$ 1,20/km")
-    print("Taxa admin: 8% | Motorista: 92%")
-    print("IMPORTANTE: use http:// no iPhone/Android, não https://")
-    print("="*60)
-    app.run(host="0.0.0.0",port=5000,debug=False)
+@app.route("/corridas/<int:id>")
+@login_obrigatorio
+def corrida_detalhes(id):
+
+    conn = conectar()
+
+    corrida = conn.execute("""
+        SELECT
+            c.*,
+            p.nome AS passageiro_nome,
+            p.telefone AS passageiro_telefone,
+            m.nome AS motorista_nome,
+            m.telefone AS motorista_telefone
+        FROM corridas_vai c
+        LEFT JOIN passageiros p
+            ON p.id = c.passageiro_id
+        LEFT JOIN motoqueiros m
+            ON m.id = c.motorista_id
+        WHERE c.id = ?
+    """, (id,)).fetchone()
+
+    conn.close()
+
+    if not corrida:
+        flash("Corrida não encontrada.", "erro")
+        return redirect(url_for("corridas"))
+
+    valor = float(corrida["valor"] or 0)
+
+    html = f"""
+    <h1>🚕 Corrida #{corrida["id"]}</h1>
+
+    <div class="card">
+
+        <h2>👤 Passageiro</h2>
+
+        <p>
+            <b>Nome:</b>
+            {corrida["passageiro_nome"] or "Não informado"}
+        </p>
+
+        <p>
+            <b>Telefone:</b>
+            {corrida["passageiro_telefone"] or "-"}
+        </p>
+
+        <h2>🏍️ Motoqueiro</h2>
+
+        <p>
+            <b>Nome:</b>
+            {corrida["motorista_nome"] or "Ainda não definido"}
+        </p>
+
+        <p>
+            <b>Telefone:</b>
+            {corrida["motorista_telefone"] or "-"}
+        </p>
+
+        <h2>📍 Trajeto</h2>
+
+        <p>
+            <b>Origem:</b>
+            {corrida["partida"] or "-"}
+        </p>
+
+        <p>
+            <b>Destino:</b>
+            {corrida["destino"] or "-"}
+        </p>
+
+        <h2>💰 Pagamento</h2>
+
+        <p>
+            <b>Valor:</b>
+            R$ {valor:.2f}
+        </p>
+
+        <p>
+            <b>Status:</b>
+            {corrida["status"] or "-"}
+        </p>
+
+        <br>
+
+        <a class="btn btn-cinza"
+           href="{url_for("corridas")}">
+           ⬅️ VOLTAR
+        </a>
+
+    </div>
+    """
+
+    return pagina(html)
+
+
+@app.route("/corridas/status/<int:id>/<status>")
+@login_obrigatorio
+def admin_corrida_status(id, status):
+
+    status_permitidos = (
+        "PENDENTE",
+        "ACEITA",
+        "EM_ANDAMENTO",
+        "CONCLUIDA",
+        "CANCELADA"
+    )
+
+    if status not in status_permitidos:
+        flash("Status inválido.", "erro")
+        return redirect(url_for("corridas"))
+
+    conn = conectar()
+
+    corrida = conn.execute(
+        "SELECT id FROM corridas_vai WHERE id=?",
+        (id,)
+    ).fetchone()
+
+    if not corrida:
+        conn.close()
+        flash("Corrida não encontrada.", "erro")
+        return redirect(url_for("corridas"))
+
+    conn.execute(
+        "UPDATE corridas_vai SET status=? WHERE id=?",
+        (status, id)
+    )
+
+    conn.commit()
+    conn.close()
+
+    flash("Status da corrida atualizado.", "sucesso")
+
+    return redirect(url_for("corridas"))
+
+
+@app.route("/corridas/excluir/<int:id>")
+@login_obrigatorio
+def excluir_corrida(id):
+
+    conn = conectar()
+
+    corrida = conn.execute(
+        "SELECT id FROM corridas_vai WHERE id=?",
+        (id,)
+    ).fetchone()
+
+    if not corrida:
+        conn.close()
+        flash("Corrida não encontrada.", "erro")
+        return redirect(url_for("corridas"))
+
+    conn.execute(
+        "DELETE FROM corridas_vai WHERE id=?",
+        (id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+    flash("Corrida excluída.", "sucesso")
+
+    return redirect(url_for("corridas"))
+# ==========================================
+# LISTAGEM DE CORRIDAS + FILTROS
+# ==========================================
+
+
+
+# ==============================
+# PWA VAI_DE_MOTO
+# ==============================
+
+@app.route("/service-worker.js")
+def service_worker():
+    return send_from_directory(
+        "static",
+        "service-worker.js",
+        mimetype="application/javascript"
+    )
+
+@app.route("/manifest.json")
+def manifest():
+    return send_from_directory(
+        "static",
+        "manifest.json",
+        mimetype="application/manifest+json"
+    )
+
+@app.route("/icone/<path:nome>")
+def icone(nome):
+    return send_from_directory("static", nome)
+
+
+if __name__ == "__main__":
+    iniciar_banco()
+
+    print("")
+    print("==============================")
+    print("     VAI_DE_MOTO")
+    print("  PAINEL ADMINISTRATIVO")
+    print("==============================")
+    print("")
+    print("Abra no navegador:")
+    print("http://127.0.0.1:5000")
+    print("")
+    print("Usuário: admin")
+    print("Senha: 123456")
+    print("")
+
+    app.run(
+        host="0.0.0.0",
+        port=5000,
+        debug=False
+    )
