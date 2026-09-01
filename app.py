@@ -93,6 +93,7 @@ def iniciar_banco():
     conn.commit()
     conn.close()
 
+iniciar_banco()
 
 def login_obrigatorio(func):
     @wraps(func)
