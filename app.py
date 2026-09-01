@@ -332,7 +332,7 @@ window.addEventListener("load", function() {
                 splash.remove();
             }, 500);
         }
-    }, 1200);
+    }, 0);
 
     if ("serviceWorker" in navigator) {
         navigator.serviceWorker.register("/service-worker.js")
