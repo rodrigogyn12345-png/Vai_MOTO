@@ -425,13 +425,7 @@ let audioLiberado=false;
 
 function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
 function esc(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
-function som(){
-  if(!audioLiberado)return;
-  try{const C=AudioContext||webkitAudioContext,ctx=new C(),o=ctx.createOscillator(),g=ctx.createGain();
-  o.frequency.value=880;g.gain.value=.08;o.connect(g);g.connect(ctx.destination);o.start();
-  setTimeout(()=>o.frequency.value=1175,130);setTimeout(()=>{o.stop();ctx.close()},320);}catch(e){}
-}
-function liberarAudio(){audioLiberado=true}
+function som(){if(!audioLiberado)return;try{const C=AudioContext||webkitAudioContext,ctx=new C();const tons=[(0,880),(180,1175),(360,880),(540,1320)];tons.forEach(([t,f])=>{setTimeout(()=>{const o=ctx.createOscillator(),g=ctx.createGain();o.type='sine';o.frequency.value=f;g.gain.setValueAtTime(.001,ctx.currentTime);g.gain.exponentialRampToValueAtTime(.32,ctx.currentTime+.02);g.gain.exponentialRampToValueAtTime(.001,ctx.currentTime+.16);o.connect(g);g.connect(ctx.destination);o.start();o.stop(ctx.currentTime+.18)},t)});setTimeout(()=>ctx.close(),900)}catch(e){}}
 document.addEventListener('click',liberarAudio,{once:true});
 
 function mostrarGPS(lat,lon,acc){
