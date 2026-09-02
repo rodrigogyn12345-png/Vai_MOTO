@@ -372,7 +372,11 @@ PASSAGEIRO = CSS + """
     <label><b>Origem</b></label>
     <input id="partida" placeholder="Origem / endereço de embarque" required>
     <label><b>Destino</b></label>
-    <input id="destino" placeholder="Digite o endereço de destino" autocomplete="street-address" required>
+    <input id="destino" placeholder="Digite rua, número, quadra, bairro e cidade" autocomplete="street-address" required>
+    <div id="sugestoesDestino" style="display:none;margin:-5px 0 12px"></div>
+    <input type="hidden" id="latitude_destino">
+    <input type="hidden" id="longitude_destino">
+    <input type="hidden" id="destino_confirmado">
     <input type="hidden" id="latitude_partida">
     <input type="hidden" id="longitude_partida">
 
@@ -454,26 +458,145 @@ function capturarGPS(){
   navigator.geolocation.getCurrentPosition(p=>{mostrarGPS(p.coords.latitude,p.coords.longitude,p.coords.accuracy);iniciarGPS()},e=>alert('Não consegui acessar o GPS. Ative a localização e permita o acesso do navegador.'),{enableHighAccuracy:true,timeout:15000,maximumAge:0});
 }
 
+let timerBuscaDestino=null;
+
+async function buscarSugestoesDestino(){
+  const input=document.getElementById('destino');
+  const area=document.getElementById('sugestoesDestino');
+  const texto=input.value.trim();
+
+  document.getElementById('latitude_destino').value='';
+  document.getElementById('longitude_destino').value='';
+  document.getElementById('destino_confirmado').value='';
+
+  if(texto.length<3){
+    area.style.display='none';
+    area.innerHTML='';
+    return;
+  }
+
+  area.style.display='block';
+  area.innerHTML='<div class="box">🔎 Procurando endereço...</div>';
+
+  try{
+    const r=await fetch('/api/buscar-enderecos',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({endereco:texto})
+    });
+
+    const d=await r.json();
+
+    if(!d.ok || !d.resultados || !d.resultados.length){
+      area.innerHTML='<div class="box">⚠️ Nenhum endereço encontrado. Tente informar bairro e cidade.</div>';
+      return;
+    }
+
+    area.innerHTML='';
+
+    d.resultados.forEach((item)=>{
+      const div=document.createElement('div');
+      div.className='box';
+      div.style.cursor='pointer';
+      div.style.margin='6px 0';
+
+      div.innerHTML='📍 <b>'+esc(item.nome)+'</b><div class="small">Toque para selecionar este endereço</div>';
+
+      div.onclick=()=>{
+        input.value=item.nome;
+
+        document.getElementById('latitude_destino').value=item.latitude;
+        document.getElementById('longitude_destino').value=item.longitude;
+        document.getElementById('destino_confirmado').value='1';
+
+        area.innerHTML='<div class="box" style="border-color:#198754">✅ <b>Destino selecionado</b><br>'+esc(item.nome)+'</div>';
+
+        area.style.display='block';
+        document.getElementById('calculo').style.display='none';
+        document.getElementById('btnSolicitar').disabled=true;
+        calculoAtual=null;
+      };
+
+      area.appendChild(div);
+    });
+
+  }catch(e){
+    area.innerHTML='<div class="box">⚠️ Não foi possível pesquisar. Verifique sua internet.</div>';
+  }
+}
+
+document.getElementById('destino').addEventListener('input',()=>{
+  clearTimeout(timerBuscaDestino);
+  timerBuscaDestino=setTimeout(buscarSugestoesDestino,600);
+});
+
 async function calcularCorrida(){
   const destino=document.getElementById('destino').value.trim();
-  if(gpsLat===null||gpsLon===null){alert('Primeiro toque em USAR MINHA LOCALIZAÇÃO.');return;}
-  if(!destino){alert('Digite o destino.');return;}
-  const b=document.getElementById('btnCalcular');b.disabled=true;b.textContent='🧮 CALCULANDO ROTA...';
+
+  if(gpsLat===null||gpsLon===null){
+    alert('Primeiro toque em USAR MINHA LOCALIZAÇÃO.');
+    return;
+  }
+
+  if(!destino){
+    alert('Digite o destino.');
+    return;
+  }
+
+  const confirmado=document.getElementById('destino_confirmado').value;
+
+  if(!confirmado){
+    alert('Escolha um endereço na lista de sugestões antes de calcular.');
+    return;
+  }
+
+  const b=document.getElementById('btnCalcular');
+  b.disabled=true;
+  b.textContent='🧮 CALCULANDO ROTA...';
+
   try{
-    const r=await fetch('/api/calcular-corrida',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude_partida:gpsLat,longitude_partida:gpsLon,destino:destino})});
+    const r=await fetch('/api/calcular-corrida',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        latitude_partida:gpsLat,
+        longitude_partida:gpsLon,
+        destino:destino
+      })
+    });
+
     const d=await r.json();
-    if(!d.ok){alert(d.erro||'Não foi possível calcular a rota.');return;}
+
+    if(!d.ok){
+      alert(d.erro||'Não foi possível calcular a rota.');
+      return;
+    }
+
     calculoAtual=d;
-    document.getElementById('distancia').textContent=Number(d.distancia_km).toFixed(2).replace('.',',')+' km';
+
+    document.getElementById('distancia').textContent=
+      Number(d.distancia_km).toFixed(2).replace('.',',')+' km';
+
     document.getElementById('valor').textContent=br(d.valor);
     document.getElementById('taxa').textContent=br(d.taxa_admin);
     document.getElementById('motoristaValor').textContent=br(d.valor_motorista);
-    document.getElementById('fonteRota').textContent=d.fonte_distancia==='rota por ruas'?'🗺️ Valor calculado pela rota de carro/moto.':'📏 Valor aproximado pela distância GPS.';
+
+    document.getElementById('fonteRota').textContent=
+      d.fonte_distancia==='rota por ruas'
+      ? '🗺️ Valor calculado pela rota de carro/moto.'
+      : '📏 Valor aproximado pela distância GPS.';
+
     document.getElementById('calculo').style.display='block';
     document.getElementById('btnSolicitar').disabled=false;
-    document.getElementById('msgCorrida').textContent='Destino localizado: '+d.destino_encontrado;
-  }catch(e){alert('Falha ao calcular. Verifique sua internet e tente novamente.');}
-  finally{b.disabled=false;b.textContent='🧮 CALCULAR VALOR';}
+    document.getElementById('msgCorrida').textContent=
+      'Destino localizado: '+d.destino_encontrado;
+
+  }catch(e){
+    alert('Falha ao calcular. Verifique sua internet e tente novamente.');
+  }finally{
+    b.disabled=false;
+    b.textContent='🧮 CALCULAR VALOR';
+  }
 }
 
 async function solicitarCorrida(){
@@ -674,6 +797,167 @@ def passageiro():
     if not u:return redirect(url_for("login"))
     if u["tipo"]!="passageiro":return "Acesso permitido somente para passageiros.",403
     return render_template_string(PASSAGEIRO,usuario=u,online=contar_motoristas_online(),poll=POLL_PASSAGEIRO)
+
+
+
+def buscar_enderecos(endereco):
+    """Busca endereços usando Nominatim e Photon."""
+    import re
+    import unicodedata
+
+    original = " ".join(str(endereco or "").split())
+    if len(original) < 3:
+        return []
+
+    def normalizar(txt):
+        txt = unicodedata.normalize("NFKD", txt)
+        txt = "".join(c for c in txt if not unicodedata.combining(c))
+        txt = txt.lower()
+        txt = re.sub(r"\bqd\.?\b", "quadra", txt)
+        txt = re.sub(r"\bqt\.?\b", "quadra", txt)
+        txt = re.sub(r"\blt\.?\b", "lote", txt)
+        txt = re.sub(r"\bjd\.?\b", "jardim", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    consultas = []
+    for q in (original, normalizar(original)):
+        if q and q not in consultas:
+            consultas.append(q)
+
+    resultados = []
+    vistos = set()
+
+    def adicionar(lat, lon, nome):
+        try:
+            lat = float(lat)
+            lon = float(lon)
+            nome = str(nome or original).strip()
+
+            chave = (round(lat, 6), round(lon, 6))
+            if chave in vistos:
+                return
+
+            vistos.add(chave)
+            resultados.append({
+                "latitude": lat,
+                "longitude": lon,
+                "nome": nome
+            })
+        except Exception:
+            pass
+
+    # ========================================================
+    # 1. NOMINATIM / OPENSTREETMAP
+    # ========================================================
+    for consulta in consultas:
+        try:
+            url = (
+                "https://nominatim.openstreetmap.org/search"
+                "?format=jsonv2"
+                "&addressdetails=1"
+                "&limit=5"
+                "&countrycodes=br"
+                "&accept-language=pt-BR"
+                "&q=" + quote(consulta)
+            )
+
+            req = Request(
+                url,
+                headers={
+                    "User-Agent": "VAI_DE_MOTO/10.0 (app de transporte local)"
+                }
+            )
+
+            with urlopen(req, timeout=8) as resp:
+                dados = json.loads(resp.read().decode("utf-8"))
+
+            for item in dados:
+                adicionar(
+                    item.get("lat"),
+                    item.get("lon"),
+                    item.get("display_name")
+                )
+
+            if len(resultados) >= 5:
+                return resultados[:5]
+
+        except Exception:
+            continue
+
+    # ========================================================
+    # 2. PHOTON / KOMOOT
+    # ========================================================
+    for consulta in consultas:
+        try:
+            url = (
+                "https://photon.komoot.io/api/"
+                "?limit=5&q=" + quote(consulta)
+            )
+
+            req = Request(
+                url,
+                headers={
+                    "User-Agent": "VAI_DE_MOTO/10.0 (app de transporte local)"
+                }
+            )
+
+            with urlopen(req, timeout=8) as resp:
+                dados = json.loads(resp.read().decode("utf-8"))
+
+            for item in dados.get("features", []):
+                props = item.get("properties", {})
+                geom = item.get("geometry", {})
+                coords = geom.get("coordinates", [])
+
+                if len(coords) >= 2:
+                    nome = props.get("name", original)
+
+                    partes = [
+                        nome,
+                        props.get("district"),
+                        props.get("city"),
+                        props.get("state")
+                    ]
+
+                    nome_completo = ", ".join(
+                        str(x).strip()
+                        for x in partes
+                        if x
+                    )
+
+                    adicionar(
+                        coords[1],
+                        coords[0],
+                        nome_completo
+                    )
+
+            if resultados:
+                return resultados[:5]
+
+        except Exception:
+            continue
+
+    return resultados[:5]
+
+
+@app.route("/api/buscar-enderecos", methods=["POST"])
+def api_buscar_enderecos():
+    u = usuario_logado()
+    if not u or u["tipo"] != "passageiro":
+        return jsonify(ok=False, erro="Faça login como passageiro."), 401
+
+    d = request.get_json(silent=True) or {}
+    endereco = str(d.get("endereco", "")).strip()
+
+    if len(endereco) < 3:
+        return jsonify(ok=True, resultados=[])
+
+    try:
+        resultados = buscar_enderecos(endereco)
+        return jsonify(ok=True, resultados=resultados)
+    except Exception:
+        return jsonify(ok=False, erro="Não foi possível pesquisar o endereço."), 500
 
 
 @app.route("/api/calcular-corrida", methods=["POST"])
