@@ -954,3 +954,5 @@ if __name__=="__main__":
     print("IMPORTANTE: use http:// no iPhone/Android, não https://")
     print("="*60)
     app.run(host="0.0.0.0",port=5000,debug=False)
+
+# VAI_DE_MOTO - versao oficial com taxa administrativa de 8%
