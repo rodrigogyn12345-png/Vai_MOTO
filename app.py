@@ -139,6 +139,7 @@ def inicializar_banco():
     con.commit()
     con.close()
 
+inicializar_banco()
 
 def marcar_motoristas_expirados():
     limite = time.time() - ONLINE_TIMEOUT
