@@ -724,7 +724,7 @@ async function iniciar(id){const r=await fetch('/api/corrida/'+id+'/iniciar',{me
 async function concluir(id){if(!confirm('Concluir esta corrida?'))return;const r=await fetch('/api/corrida/'+id+'/concluir',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível concluir.');return;}som();carregarMinhaCorrida();carregarCorridas();}
 async function carregarGanhos(){try{const r=await fetch("/api/motorista/ganhos");if(!r.ok)return;const d=await r.json();document.getElementById("ganhosTotal").textContent=d.ganhos_total;document.getElementById("corridasConcluidas").textContent=d.corridas_concluidas;document.getElementById("ganhosHoje").textContent=d.ganhos_hoje;document.getElementById("corridasHoje").textContent=d.corridas_hoje+" corrida"+(d.corridas_hoje===1?"":"s")+" concluída"+(d.corridas_hoje===1?"":"s")+" hoje";}catch(e){}}
 
-if(online)gps();carregarCorridas();carregarMinhaCorrida();carregarGanhos();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida()}},{{ poll }});
+if(online)gps();carregarCorridas();carregarMinhaCorrida();carregarGanhos();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida();carregarGanhos()}},{{ poll }});
 </script>
 """
 
