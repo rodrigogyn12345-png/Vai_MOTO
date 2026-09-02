@@ -13,8 +13,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # VAIMOTO V10 - PASSAGEIRO + MOTORISTA + GPS + TARIFA
 # ============================================================
 # Tarifa: R$ 1,20/km
-# Taxa administrativa: 9%
-# Motorista: 91%
+# Taxa administrativa: 8%
+# Motorista: 92%
 # IMPORTANTE: este arquivo usa HTTP local. Abra no celular com
 # http://IP_DO_ANDROID:5000 (nao https://).
 # ============================================================
@@ -25,8 +25,8 @@ app.secret_key = "vaimoto-v10-troque-esta-chave"
 BASE_DIR = Path(__file__).resolve().parent
 DB = str(BASE_DIR / "vaimoto.db")
 
-PRECO_KM = 2.00
-TAXA_ADMIN = 0.09
+PRECO_KM = 1.20
+TAXA_ADMIN = 0.08
 PERCENTUAL_MOTORISTA = 1.0 - TAXA_ADMIN
 ONLINE_TIMEOUT = 35
 LOCATION_TIMEOUT = 60
@@ -84,7 +84,7 @@ def inicializar_banco():
             latitude_destino REAL,
             longitude_destino REAL,
             distancia_km REAL,
-            preco_km REAL DEFAULT 2.00,
+            preco_km REAL DEFAULT 1.20,
             taxa_admin_percent REAL DEFAULT 8.0,
             taxa_admin REAL DEFAULT 0,
             valor_motorista REAL DEFAULT 0,
@@ -103,6 +103,7 @@ def inicializar_banco():
         ("longitude", "REAL"),
         ("location_seen", "REAL NOT NULL DEFAULT 0"),
         ("criado_em", "REAL NOT NULL DEFAULT 0"),
+        ("bloqueado", "INTEGER NOT NULL DEFAULT 0"),
     ]
     for col, typ in usuarios:
         if not coluna_existe(con, "usuarios_vai", col):
@@ -115,7 +116,7 @@ def inicializar_banco():
         ("latitude_destino", "REAL"),
         ("longitude_destino", "REAL"),
         ("distancia_km", "REAL"),
-        ("preco_km", "REAL DEFAULT 2.00"),
+        ("preco_km", "REAL DEFAULT 1.20"),
         ("taxa_admin_percent", "REAL DEFAULT 8.0"),
         ("taxa_admin", "REAL DEFAULT 0"),
         ("valor_motorista", "REAL DEFAULT 0"),
@@ -133,8 +134,8 @@ def inicializar_banco():
         UPDATE corridas_vai
         SET preco_km=COALESCE(preco_km, 2.00),
             taxa_admin_percent=COALESCE(taxa_admin_percent, 8.0),
-            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.09, 2)),
-            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.91, 2))
+            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.08, 2)),
+            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.92, 2))
     """)
     con.commit()
     con.close()
@@ -262,19 +263,42 @@ def sessao_tipo(tipo):
 # ============================================================
 CSS = """
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f1f3f6;font-family:Arial,sans-serif;color:#111}
-.card{width:min(94%,760px);margin:18px auto;background:#fff;border-radius:24px;padding:20px;box-shadow:0 8px 25px rgba(0,0,0,.10)}
-h1{margin:0 0 8px;font-size:30px}h2{font-size:23px;margin:12px 0}p{font-size:17px}
-input,select{width:100%;padding:15px;margin:6px 0 12px;border:1px solid #ccc;border-radius:14px;font-size:17px;background:#fff}
+*{box-sizing:border-box}
+body{margin:0;background:#050505;font-family:Arial,sans-serif;color:#fff}
+.card{width:94%;max-width:760px;margin:18px auto;background:#111;border-radius:24px;padding:20px;box-shadow:0 8px 25px rgba(0,0,0,.5)}
+h1{margin:0 0 8px;font-size:30px}
+h2{font-size:23px;margin:12px 0}
+p{font-size:17px}
+input,select{width:100%;padding:15px;margin:6px 0 12px;border:2px solid #333;border-radius:14px;font-size:17px;background:#fff;color:#111}
 button,.btn{display:block;width:100%;padding:15px;margin:9px 0;border:0;border-radius:14px;font-size:18px;text-align:center;text-decoration:none;cursor:pointer}
-.green{background:#159447;color:#fff}.black{background:#111;color:#fff}.gray{background:#666;color:#fff}.red{background:#c62828;color:#fff}.blue{background:#1769aa;color:#fff}.orange{background:#e67e22;color:#fff}
-.status{padding:15px;border-radius:14px;margin:12px 0;font-size:19px;font-weight:bold;text-align:center}.online{background:#dff7e6;color:#08752e}.offline{background:#eee;color:#555}
-.box,.ride{border:1px solid #ddd;border-radius:16px;padding:15px;margin:12px 0;background:#fff}.ride{border-width:2px}.gps{background:#eef6ff;border-color:#cfe5ff}
-.small{font-size:14px;color:#666}.badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#eee;font-size:12px;font-weight:bold}
-.row{display:flex;gap:8px}.row>*{flex:1}.price{font-size:28px;font-weight:bold;margin:8px 0}.maplink{color:#1769aa;font-weight:bold;text-decoration:none}
-.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.top .badge{margin-top:5px}
-.money{background:#f8fff9;border:1px solid #c9e8d1;border-radius:14px;padding:12px}.warn{background:#fff7e6;border:1px solid #ffd27a;border-radius:14px;padding:12px}
-@media(max-width:520px){.card{width:96%;padding:15px}h1{font-size:26px}.row{display:block}}
+button,.btn.black{background:#000;color:#FFD000}
+.green{background:#159447;color:#fff}
+.black{background:#000;color:#FFD000}
+.gray{background:#666;color:#fff}
+.red{background:#d62828;color:#fff}
+.blue{background:#FFD000;color:#000}
+.orange{background:#e67e22;color:#fff}
+.status{padding:15px;border-radius:14px;margin:12px 0;font-size:19px;font-weight:bold;text-align:center}
+.online{background:#1b5e20;color:#fff}
+.offline{background:#333;color:#fff}
+.box,.ride{border:2px solid #333;border-radius:16px;padding:15px;margin:12px 0;background:#fff;color:#111}
+.ride{border-width:2px}
+.small{font-size:14px;color:#555}
+.badge{display:inline-block;padding:5px 9px;border-radius:20px;background:#FFD000;color:#000;font-size:12px;font-weight:bold}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.price{font-size:28px;font-weight:bold;margin:8px 0}
+.maplink{color:#FFD000;font-weight:bold;text-decoration:none}
+.top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.top .badge{margin-top:5px}
+.money{background:#FFD000;color:#000;border:2px solid #000;border-radius:14px;padding:12px}
+.warn{background:#FFD000;color:#000;border:2px solid #000;border-radius:14px;padding:12px}
+a{color:#FFD000}
+@media(max-width:520px){
+.card{width:96%;padding:15px}
+h1{font-size:26px}
+.row{display:block}
+}
 </style>
 """
 
@@ -286,7 +310,7 @@ HOME = CSS + """
 <div class="card">
   <h1>🏍️ VaiMoto V10</h1>
   <p>Solicite sua corrida ou trabalhe como motorista.</p>
-  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 9%</div>
+  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 8%</div>
   <a class="btn black" href="{{ url_for('login') }}">Entrar</a>
   <a class="btn green" href="{{ url_for('cadastro') }}">Criar cadastro</a>
 </div>
@@ -356,8 +380,8 @@ PASSAGEIRO = CSS + """
     <div id="calculo" style="display:none" class="money">
       <div>📏 Distância: <b id="distancia">0,00 km</b></div>
       <div class="price" id="valor">R$ 0,00</div>
-      <div>🏢 Taxa do app (9%): <b id="taxa">R$ 0,00</b></div>
-      <div>🏍️ Motorista recebe (91%): <b id="motoristaValor">R$ 0,00</b></div>
+      <div>🏢 Taxa do app (8%): <b id="taxa">R$ 0,00</b></div>
+      <div>🏍️ Motorista recebe (92%): <b id="motoristaValor">R$ 0,00</b></div>
       <div class="small" id="fonteRota"></div>
     </div>
     <label style="display:block;margin-top:15px"><b>💳 Forma de pagamento</b></label>
@@ -493,7 +517,7 @@ function renderCorridas(lista){
     }
     let cancel='';if(c.status==='PENDENTE'||c.status==='ACEITA')cancel='<button class="red" onclick="cancelarCorrida('+c.id+')">❌ CANCELAR CORRIDA</button>';
     const el=document.createElement('div');el.className='ride';
-    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 9%: '+br(c.taxa_admin)+' • 🏍️ Motorista 91%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
+    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Motorista 92%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
     area.appendChild(el);
     const old=ultimaNotificacao[c.id];
     if(old && old!==c.status && c.status==='ACEITA'){som();if(navigator.vibrate)navigator.vibrate([200,100,300]);}
@@ -533,7 +557,7 @@ MOTORISTA = CSS + """
 
   <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>
 
-  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 91% • app fica com 9%</div>
+  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 92% • app fica com 8%</div>
 
   <h2>🔔 Corridas disponíveis</h2>
   <div id="corridas"><div class="box">Carregando...</div></div>
@@ -558,7 +582,7 @@ async function carregarCorridas(){
   try{const r=await fetch('/api/corridas-disponiveis');if(!r.ok)return;const d=await r.json();const area=document.getElementById('corridas');
     if(!d.corridas.length){area.innerHTML='<div class="box">Nenhuma corrida pendente no momento.</div>';return;}
     area.innerHTML='';d.corridas.forEach(c=>{if(ultimoId!==c.id){som();if(navigator.vibrate)navigator.vibrate([300,150,300]);ultimoId=c.id;}
-      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 9%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
+      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
   }catch(e){}}
 async function aceitar(id){const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Essa corrida já foi aceita.');carregarCorridas();return;}som();carregarCorridas();carregarMinhaCorrida();}
 async function carregarMinhaCorrida(){try{const r=await fetch('/api/minha-corrida-motorista');if(!r.ok)return;const d=await r.json();const c=d.corrida;const area=document.getElementById('minhaCorrida');if(!c){area.innerHTML='<div class="box">Nenhuma corrida aceita.</div>';return;}if(ultimoStatus&&ultimoStatus!==c.status)som();ultimoStatus=c.status;
@@ -855,12 +879,59 @@ def admin():
     """).fetchall();con.close()
     html=CSS+"""
     <div class="card"><h1>📊 VaiMoto Admin</h1>
+    <a class="btn black" href="{{ url_for("motoqueiros",key=request.args.get("key")) }}">🏍️ MOTOQUEIROS</a>
     <div class="row"><div class="money"><b>Corridas concluídas</b><div class="price">{{ t['corridas'] }}</div></div><div class="money"><b>Faturamento</b><div class="price">R$ {{ '%.2f'|format(t['faturamento']) }}</div></div></div>
-    <div class="row"><div class="money"><b>🏢 Taxas do app (9%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (91%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
+    <div class="row"><div class="money"><b>🏢 Taxas do app (8%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (92%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
     <h2>Últimas corridas</h2>{% for c in ult %}<div class="ride"><b>#{{c['id']}}</b> {{c['status']}}<br>{{c['passageiro_nome']}} → {{c['motorista_nome'] or 'sem motorista'}}<br>{{c['partida']}} → {{c['destino']}}<br>R$ {{'%.2f'|format(c['valor'])}} • App R$ {{'%.2f'|format(c['taxa_admin'] or 0)}} • Motorista R$ {{'%.2f'|format(c['valor_motorista'] or 0)}}</div>{% else %}<div class="box">Nenhuma corrida.</div>{% endfor %}</div>
     """
     return render_template_string(html,t=tot,ult=ult)
 
+
+
+@app.route("/motoqueiros")
+def motoqueiros():
+    if request.args.get("key") != ADMIN_KEY:
+        return "Acesso negado.",403
+    con=conectar()
+    motos=con.execute("SELECT id,nome,whatsapp,online,last_seen,latitude,longitude,criado_em,bloqueado FROM usuarios_vai WHERE tipo=\"motorista\" ORDER BY id DESC").fetchall()
+    con.close()
+    html=CSS+"""
+    <div class="card">
+      <h1>🏍️ Motoqueiros</h1>
+      <a class="btn black" href="{{ url_for(\"admin\",key=request.args.get(\"key\")) }}">⬅️ Voltar ao Admin</a>
+      {% for m in motos %}
+      <div class="ride">
+        <b>{{ m[\"nome\"] }}</b><br>
+        📱 {{ m[\"whatsapp\"] }}<br>
+        {% if m[\"online\"] %}🟢 ONLINE{% else %}⚪ OFFLINE{% endif %}
+        {% if m["bloqueado"] %}🔴 BLOQUEADO{% endif %}<br><br><form method="post" action="{{ url_for("bloquear_motoqueiro",mid=m["id"],key=request.args.get("key")) }}" style="display:inline"><button class="red" type="submit">{% if m["bloqueado"] %}DESBLOQUEAR{% else %}BLOQUEAR{% endif %}</button></form> <form method="post" action="{{ url_for("excluir_motoqueiro",mid=m["id"],key=request.args.get("key")) }}" style="display:inline" onsubmit="return confirm("Excluir este motorista?")"><button class="black" type="submit">EXCLUIR</button></form>
+      </div>
+      {% else %}
+      <div class="box">Nenhum motorista cadastrado.</div>
+      {% endfor %}
+    </div>
+    """
+    return render_template_string(html,motos=motos)
+
+
+@app.route("/motoqueiros/bloquear/<int:mid>",methods=["POST"])
+def bloquear_motoqueiro(mid):
+    if request.args.get("key") != ADMIN_KEY:return "Acesso negado.",403
+    con=conectar()
+    m=con.execute("SELECT bloqueado FROM usuarios_vai WHERE id=? AND tipo=\"motorista\"",(mid,)).fetchone()
+    if not m: con.close();return "Motorista não encontrado.",404
+    novo=0 if m["bloqueado"] else 1
+    con.execute("UPDATE usuarios_vai SET bloqueado=?,online=0,last_seen=0,latitude=NULL,longitude=NULL,location_seen=0 WHERE id=? AND tipo=\"motorista\"",(novo,mid))
+    con.commit();con.close()
+    return redirect(url_for("motoqueiros",key=ADMIN_KEY))
+
+@app.route("/motoqueiros/excluir/<int:mid>",methods=["POST"])
+def excluir_motoqueiro(mid):
+    if request.args.get("key") != ADMIN_KEY:return "Acesso negado.",403
+    con=conectar()
+    con.execute("DELETE FROM usuarios_vai WHERE id=? AND tipo=\"motorista\"",(mid,))
+    con.commit();con.close()
+    return redirect(url_for("motoqueiros",key=ADMIN_KEY))
 
 # ============================================================
 # ERROS
@@ -879,7 +950,7 @@ if __name__=="__main__":
     print("Local: http://127.0.0.1:5000")
     print("Rede:  http://0.0.0.0:5000")
     print("Tarifa: R$ 1,20/km")
-    print("Taxa admin: 9% | Motorista: 91%")
+    print("Taxa admin: 8% | Motorista: 92%")
     print("IMPORTANTE: use http:// no iPhone/Android, não https://")
     print("="*60)
     app.run(host="0.0.0.0",port=5000,debug=False)
