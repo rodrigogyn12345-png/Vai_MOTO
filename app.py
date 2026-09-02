@@ -555,7 +555,15 @@ MOTORISTA = CSS + """
   <div id="onlineBox" class="status {% if usuario['online'] %}online{% else %}offline{% endif %}">{% if usuario['online'] %}🟢 MOTORISTA ONLINE{% else %}⚪ MOTORISTA OFFLINE{% endif %}</div>
   <button id="toggleBtn" class="{% if usuario['online'] %}red{% else %}green{% endif %}" onclick="alternarOnline()">{% if usuario['online'] %}FICAR OFFLINE{% else %}FICAR ONLINE{% endif %}</button>
 
-  <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>
+  <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>\n  <div class="box" id="ganhosBox">
+    <h2>💰 Meus ganhos</h2>
+    <div class="row">
+      <div class="money"><b>💵 Ganhos totais</b><div class="price" id="ganhosTotal">R$ 0,00</div></div>
+      <div class="money"><b>🏁 Corridas concluídas</b><div class="price" id="corridasConcluidas">0</div></div>
+    </div>
+    <div class="money"><b>📅 Total de hoje</b><div class="price" id="ganhosHoje">R$ 0,00</div><div class="small" id="corridasHoje">0 corridas concluídas hoje</div></div>
+  </div>
+
 
   <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 92% • app fica com 8%</div>
 
@@ -591,7 +599,9 @@ async function carregarMinhaCorrida(){try{const r=await fetch('/api/minha-corrid
  }catch(e){}}
 async function iniciar(id){const r=await fetch('/api/corrida/'+id+'/iniciar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível iniciar.');return;}som();carregarMinhaCorrida();carregarCorridas();}
 async function concluir(id){if(!confirm('Concluir esta corrida?'))return;const r=await fetch('/api/corrida/'+id+'/concluir',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Não foi possível concluir.');return;}som();carregarMinhaCorrida();carregarCorridas();}
-if(online)gps();carregarCorridas();carregarMinhaCorrida();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida()}},{{ poll }});
+async function carregarGanhos(){try{const r=await fetch("/api/motorista/ganhos");if(!r.ok)return;const d=await r.json();document.getElementById("ganhosTotal").textContent=d.ganhos_total;document.getElementById("corridasConcluidas").textContent=d.corridas_concluidas;document.getElementById("ganhosHoje").textContent=d.ganhos_hoje;document.getElementById("corridasHoje").textContent=d.corridas_hoje+" corrida"+(d.corridas_hoje===1?"":"s")+" concluída"+(d.corridas_hoje===1?"":"s")+" hoje";}catch(e){}}
+
+if(online)gps();carregarCorridas();carregarMinhaCorrida();carregarGanhos();setInterval(()=>{if(online){gps();carregarCorridas();carregarMinhaCorrida()}},{{ poll }});
 </script>
 """
 
@@ -819,6 +829,20 @@ def api_corridas_disponiveis():
       SELECT c.id,c.partida,c.destino,c.valor,c.latitude_partida,c.longitude_partida,c.latitude_destino,c.longitude_destino,c.distancia_km,c.taxa_admin,c.valor_motorista,c.criada_em
       FROM corridas_vai c WHERE c.status='PENDENTE' ORDER BY c.id ASC
     """).fetchall();con.close();return jsonify(corridas=[dict(r) for r in rows])
+
+
+@app.route("/api/motorista/ganhos")
+def api_motorista_ganhos():
+    u=usuario_logado()
+    if not u or u["tipo"]!="motorista":
+        return jsonify(ok=False,erro="Acesso negado."),401
+    con=conectar()
+    total=con.execute("SELECT COUNT(*) corridas_concluidas, COALESCE(SUM(valor_motorista),0) ganhos_total FROM corridas_vai WHERE motorista_id=? AND status=\"CONCLUIDA\"",(u["id"],)).fetchone()
+    agora=time.localtime()
+    inicio_hoje=time.mktime((agora.tm_year,agora.tm_mon,agora.tm_mday,0,0,0,0,0))
+    hoje=con.execute("SELECT COUNT(*) corridas_hoje, COALESCE(SUM(valor_motorista),0) ganhos_hoje FROM corridas_vai WHERE motorista_id=? AND status=\"CONCLUIDA\" AND concluida_em>=?",(u["id"],inicio_hoje)).fetchone()
+    con.close()
+    return jsonify(ok=True,motorista=u["nome"],ganhos_total=dinheiro(total["ganhos_total"]),corridas_concluidas=int(total["corridas_concluidas"] or 0),ganhos_hoje=dinheiro(hoje["ganhos_hoje"]),corridas_hoje=int(hoje["corridas_hoje"] or 0))
 
 
 @app.route("/api/minha-corrida-motorista")
