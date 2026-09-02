@@ -5,6 +5,7 @@ import time
 import re
 import math
 import json
+import urllib.parse
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -795,29 +796,30 @@ def passageiro():
 
 
 def buscar_enderecos(endereco):
-    """Busca endereços usando Nominatim e Photon."""
-    import re
-    import unicodedata
-
-    original = " ".join(str(endereco or "").split())
+    """Busca sugestões de endereço usando Nominatim e Photon."""
+    original = str(endereco or "").strip()
     if len(original) < 3:
         return []
 
-    def normalizar(txt):
-        txt = unicodedata.normalize("NFKD", txt)
-        txt = "".join(c for c in txt if not unicodedata.combining(c))
-        txt = txt.lower()
-        txt = re.sub(r"\bqd\.?\b", "quadra", txt)
-        txt = re.sub(r"\bqt\.?\b", "quadra", txt)
-        txt = re.sub(r"\blt\.?\b", "lote", txt)
-        txt = re.sub(r"\bjd\.?\b", "jardim", txt)
-        txt = re.sub(r"\s+", " ", txt).strip()
-        return txt
-
     consultas = []
-    for q in (original, normalizar(original)):
+
+    def add(q):
+        q = " ".join(str(q).split()).strip(" ,")
         if q and q not in consultas:
             consultas.append(q)
+
+    add(original)
+
+    # Expande abreviações comuns.
+    expandido = original
+    import re
+    expandido = re.sub(r"\\bQD\\.?\\b", "Quadra", expandido, flags=re.I)
+    expandido = re.sub(r"\\bLT\\.?\\b", "Lote", expandido, flags=re.I)
+    add(expandido)
+
+    # Se não informou a cidade, tenta Aragoiânia-GO.
+    if not re.search(r"aragoi[aâ]nia|goi[aá]s", expandido, re.I):
+        add(expandido + ", Aragoiânia, Goiás, Brasil")
 
     resultados = []
     vistos = set()
@@ -826,24 +828,27 @@ def buscar_enderecos(endereco):
         try:
             lat = float(lat)
             lon = float(lon)
-            nome = str(nome or original).strip()
+        except:
+            return
 
-            chave = (round(lat, 6), round(lon, 6))
-            if chave in vistos:
-                return
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            return
 
-            vistos.add(chave)
-            resultados.append({
-                "latitude": lat,
-                "longitude": lon,
-                "nome": nome
-            })
-        except Exception:
-            pass
+        chave = (round(lat, 5), round(lon, 5))
+        if chave in vistos:
+            return
 
-    # ========================================================
-    # 1. NOMINATIM / OPENSTREETMAP
-    # ========================================================
+        vistos.add(chave)
+        nome = str(nome or original).strip()
+
+        resultados.append({
+            "latitude": lat,
+            "longitude": lon,
+            "nome": nome,
+            "endereco": nome
+        })
+
+    # Nominatim / OpenStreetMap
     for consulta in consultas:
         try:
             url = (
@@ -853,86 +858,116 @@ def buscar_enderecos(endereco):
                 "&limit=5"
                 "&countrycodes=br"
                 "&accept-language=pt-BR"
-                "&q=" + quote(consulta)
+                "&q=" + urllib.parse.quote(consulta)
             )
 
             req = Request(
                 url,
-                headers={
-                    "User-Agent": "VAI_DE_MOTO/10.0 (app de transporte local)"
-                }
+                headers={"User-Agent": "VAI_DE_MOTO/10.0"}
             )
 
             with urlopen(req, timeout=8) as resp:
                 dados = json.loads(resp.read().decode("utf-8"))
 
             for item in dados:
+                a = item.get("address", {})
+                partes = []
+
+                nome = item.get("name")
+                rua = (
+                    a.get("road")
+                    or a.get("pedestrian")
+                    or a.get("residential")
+                )
+                numero = a.get("house_number")
+                bairro = (
+                    a.get("suburb")
+                    or a.get("neighbourhood")
+                    or a.get("quarter")
+                )
+                cidade = (
+                    a.get("city")
+                    or a.get("town")
+                    or a.get("municipality")
+                )
+                estado = a.get("state")
+
+                if nome:
+                    partes.append(str(nome))
+                if rua and str(rua) not in partes:
+                    partes.append(str(rua))
+                if numero:
+                    partes.append("Nº " + str(numero))
+                if bairro:
+                    partes.append(str(bairro))
+                if cidade:
+                    partes.append(str(cidade))
+                if estado:
+                    partes.append(str(estado))
+
+                nome_completo = ", ".join(partes) or item.get(
+                    "display_name", original
+                )
+
                 adicionar(
                     item.get("lat"),
                     item.get("lon"),
-                    item.get("display_name")
+                    nome_completo
                 )
 
-            if len(resultados) >= 5:
-                return resultados[:5]
+            if len(resultados) >= 8:
+                break
 
         except Exception:
             continue
 
-    # ========================================================
-    # 2. PHOTON / KOMOOT
-    # ========================================================
-    for consulta in consultas:
-        try:
-            url = (
-                "https://photon.komoot.io/api/"
-                "?limit=5&q=" + quote(consulta)
-            )
+    # Photon como segunda tentativa.
+    if len(resultados) < 3:
+        for consulta in consultas:
+            try:
+                url = (
+                    "https://photon.komoot.io/api/"
+                    "?limit=5&lang=pt&q="
+                    + urllib.parse.quote(consulta + ", Brasil")
+                )
 
-            req = Request(
-                url,
-                headers={
-                    "User-Agent": "VAI_DE_MOTO/10.0 (app de transporte local)"
-                }
-            )
+                req = Request(
+                    url,
+                    headers={"User-Agent": "VAI_DE_MOTO/10.0"}
+                )
 
-            with urlopen(req, timeout=8) as resp:
-                dados = json.loads(resp.read().decode("utf-8"))
+                with urlopen(req, timeout=8) as resp:
+                    dados = json.loads(resp.read().decode("utf-8"))
 
-            for item in dados.get("features", []):
-                props = item.get("properties", {})
-                geom = item.get("geometry", {})
-                coords = geom.get("coordinates", [])
+                for item in dados.get("features", []):
+                    props = item.get("properties", {})
+                    geom = item.get("geometry", {})
+                    coords = geom.get("coordinates", [])
 
-                if len(coords) >= 2:
-                    nome = props.get("name", original)
+                    if len(coords) < 2:
+                        continue
 
                     partes = [
-                        nome,
+                        props.get("name"),
+                        props.get("street"),
                         props.get("district"),
                         props.get("city"),
                         props.get("state")
                     ]
 
-                    nome_completo = ", ".join(
-                        str(x).strip()
-                        for x in partes
-                        if x
-                    )
+                    nome = ", ".join(
+                        str(x).strip() for x in partes if x
+                    ) or consulta
 
-                    adicionar(
-                        coords[1],
-                        coords[0],
-                        nome_completo
-                    )
+                    adicionar(coords[1], coords[0], nome)
 
-            if resultados:
-                return resultados[:5]
+            except Exception:
+                continue
 
-        except Exception:
-            continue
+            if len(resultados) >= 8:
+                break
 
-    return resultados[:5]
+    return resultados[:8]
 
 
 @app.route("/api/buscar-enderecos", methods=["POST"])
