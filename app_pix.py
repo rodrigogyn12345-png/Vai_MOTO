@@ -13,8 +13,8 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # VAIMOTO V10 - PASSAGEIRO + MOTORISTA + GPS + TARIFA
 # ============================================================
 # Tarifa: R$ 1,20/km
-# Taxa administrativa: 8%
-# Motorista: 92%
+# Taxa administrativa: 9%
+# Motorista: 91%
 # IMPORTANTE: este arquivo usa HTTP local. Abra no celular com
 # http://IP_DO_ANDROID:5000 (nao https://).
 # ============================================================
@@ -25,8 +25,8 @@ app.secret_key = "vaimoto-v10-troque-esta-chave"
 BASE_DIR = Path(__file__).resolve().parent
 DB = str(BASE_DIR / "vaimoto.db")
 
-PRECO_KM = 1.20
-TAXA_ADMIN = 0.08
+PRECO_KM = 2.00
+TAXA_ADMIN = 0.09
 PERCENTUAL_MOTORISTA = 1.0 - TAXA_ADMIN
 ONLINE_TIMEOUT = 35
 LOCATION_TIMEOUT = 60
@@ -84,7 +84,7 @@ def inicializar_banco():
             latitude_destino REAL,
             longitude_destino REAL,
             distancia_km REAL,
-            preco_km REAL DEFAULT 1.20,
+            preco_km REAL DEFAULT 2.00,
             taxa_admin_percent REAL DEFAULT 8.0,
             taxa_admin REAL DEFAULT 0,
             valor_motorista REAL DEFAULT 0,
@@ -115,7 +115,7 @@ def inicializar_banco():
         ("latitude_destino", "REAL"),
         ("longitude_destino", "REAL"),
         ("distancia_km", "REAL"),
-        ("preco_km", "REAL DEFAULT 1.20"),
+        ("preco_km", "REAL DEFAULT 2.00"),
         ("taxa_admin_percent", "REAL DEFAULT 8.0"),
         ("taxa_admin", "REAL DEFAULT 0"),
         ("valor_motorista", "REAL DEFAULT 0"),
@@ -131,10 +131,10 @@ def inicializar_banco():
     # Corridas antigas: conserva o valor e calcula a divisão administrativa.
     con.execute("""
         UPDATE corridas_vai
-        SET preco_km=COALESCE(preco_km, 1.20),
+        SET preco_km=COALESCE(preco_km, 2.00),
             taxa_admin_percent=COALESCE(taxa_admin_percent, 8.0),
-            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.08, 2)),
-            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.92, 2))
+            taxa_admin=COALESCE(taxa_admin, ROUND(valor * 0.09, 2)),
+            valor_motorista=COALESCE(valor_motorista, ROUND(valor * 0.91, 2))
     """)
     con.commit()
     con.close()
@@ -286,7 +286,7 @@ HOME = CSS + """
 <div class="card">
   <h1>🏍️ VaiMoto V10</h1>
   <p>Solicite sua corrida ou trabalhe como motorista.</p>
-  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 8%</div>
+  <div class="money"><b>💰 Tarifa:</b> R$ 1,20 por km<br><b>🏢 Taxa do app:</b> 9%</div>
   <a class="btn black" href="{{ url_for('login') }}">Entrar</a>
   <a class="btn green" href="{{ url_for('cadastro') }}">Criar cadastro</a>
 </div>
@@ -493,7 +493,7 @@ function renderCorridas(lista){
     }
     let cancel='';if(c.status==='PENDENTE'||c.status==='ACEITA')cancel='<button class="red" onclick="cancelarCorrida('+c.id+')">❌ CANCELAR CORRIDA</button>';
     const el=document.createElement('div');el.className='ride';
-    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Motorista 92%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
+    el.innerHTML='<b>🚕 Corrida #'+c.id+'</b> <span class="badge">'+esc(c.status)+'</span><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<br><div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 9%: '+br(c.taxa_admin)+' • 🏍️ Motorista 91%: '+br(c.valor_motorista)+'</div>'+s+motorista+cancel;
     area.appendChild(el);
     const old=ultimaNotificacao[c.id];
     if(old && old!==c.status && c.status==='ACEITA'){som();if(navigator.vibrate)navigator.vibrate([200,100,300]);}
@@ -533,7 +533,7 @@ MOTORISTA = CSS + """
 
   <div class="box gps"><b>📍 GPS do motorista</b><div id="gpsText" class="small">Ative o modo online para enviar sua localização.</div></div>
 
-  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 92% • app fica com 8%</div>
+  <div class="money"><b>💰 Regra de ganhos</b><br>R$ 1,20/km • motorista recebe 91% • app fica com 9%</div>
 
   <h2>🔔 Corridas disponíveis</h2>
   <div id="corridas"><div class="box">Carregando...</div></div>
@@ -558,7 +558,7 @@ async function carregarCorridas(){
   try{const r=await fetch('/api/corridas-disponiveis');if(!r.ok)return;const d=await r.json();const area=document.getElementById('corridas');
     if(!d.corridas.length){area.innerHTML='<div class="box">Nenhuma corrida pendente no momento.</div>';return;}
     area.innerHTML='';d.corridas.forEach(c=>{if(ultimoId!==c.id){som();if(navigator.vibrate)navigator.vibrate([300,150,300]);ultimoId=c.id;}
-      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 8%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
+      const el=document.createElement('div');el.className='ride';el.innerHTML='<b>🚕 Corrida #'+c.id+'</b><br>📍 '+esc(c.partida)+'<br>🏁 '+esc(c.destino)+'<br>📏 '+Number(c.distancia_km||0).toFixed(2).replace('.',',')+' km<div class="price">'+br(c.valor)+'</div><div class="small">🏢 App 9%: '+br(c.taxa_admin)+' • 🏍️ Você recebe: '+br(c.valor_motorista)+'</div><a class="btn blue" target="_blank" href="https://www.google.com/maps/search/?api=1&query='+ (c.latitude_partida!=null&&c.longitude_partida!=null?c.latitude_partida+','+c.longitude_partida:encodeURIComponent(c.partida)) +'">📍 IR PARA EMBARQUE</a><button class="green" onclick="aceitar('+c.id+')">🏍️ ACEITAR CORRIDA</button>';area.appendChild(el);});
   }catch(e){}}
 async function aceitar(id){const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'});const d=await r.json();if(!d.ok){alert(d.erro||'Essa corrida já foi aceita.');carregarCorridas();return;}som();carregarCorridas();carregarMinhaCorrida();}
 async function carregarMinhaCorrida(){try{const r=await fetch('/api/minha-corrida-motorista');if(!r.ok)return;const d=await r.json();const c=d.corrida;const area=document.getElementById('minhaCorrida');if(!c){area.innerHTML='<div class="box">Nenhuma corrida aceita.</div>';return;}if(ultimoStatus&&ultimoStatus!==c.status)som();ultimoStatus=c.status;
@@ -856,7 +856,7 @@ def admin():
     html=CSS+"""
     <div class="card"><h1>📊 VaiMoto Admin</h1>
     <div class="row"><div class="money"><b>Corridas concluídas</b><div class="price">{{ t['corridas'] }}</div></div><div class="money"><b>Faturamento</b><div class="price">R$ {{ '%.2f'|format(t['faturamento']) }}</div></div></div>
-    <div class="row"><div class="money"><b>🏢 Taxas do app (8%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (92%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
+    <div class="row"><div class="money"><b>🏢 Taxas do app (9%)</b><div class="price">R$ {{ '%.2f'|format(t['taxa_admin']) }}</div></div><div class="money"><b>🏍️ Motoristas (91%)</b><div class="price">R$ {{ '%.2f'|format(t['motorista']) }}</div></div></div>
     <h2>Últimas corridas</h2>{% for c in ult %}<div class="ride"><b>#{{c['id']}}</b> {{c['status']}}<br>{{c['passageiro_nome']}} → {{c['motorista_nome'] or 'sem motorista'}}<br>{{c['partida']}} → {{c['destino']}}<br>R$ {{'%.2f'|format(c['valor'])}} • App R$ {{'%.2f'|format(c['taxa_admin'] or 0)}} • Motorista R$ {{'%.2f'|format(c['valor_motorista'] or 0)}}</div>{% else %}<div class="box">Nenhuma corrida.</div>{% endfor %}</div>
     """
     return render_template_string(html,t=tot,ult=ult)
@@ -879,7 +879,7 @@ if __name__=="__main__":
     print("Local: http://127.0.0.1:5000")
     print("Rede:  http://0.0.0.0:5000")
     print("Tarifa: R$ 1,20/km")
-    print("Taxa admin: 8% | Motorista: 92%")
+    print("Taxa admin: 9% | Motorista: 91%")
     print("IMPORTANTE: use http:// no iPhone/Android, não https://")
     print("="*60)
     app.run(host="0.0.0.0",port=5000,debug=False)
