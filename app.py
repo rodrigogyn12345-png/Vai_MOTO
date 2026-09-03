@@ -2052,6 +2052,40 @@ carregarCorridas();
     """)
 
 
+@app.route("/motorista/alternar-status", methods=["POST"])
+def motorista_alternar_status():
+    mid = _motorista_logado()
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+    m = conn.execute(
+        "SELECT status, conexao FROM motoqueiros WHERE id=?",
+        (mid,)
+    ).fetchone()
+
+    if not m:
+        conn.close()
+        return redirect(url_for("login_motorista"))
+
+    if m["status"] != "aprovado":
+        conn.close()
+        return _pagina_publica(
+            "Motorista",
+            '<div class="alert erro">Motorista ainda não foi aprovado.</div>'
+        )
+
+    novo_status = "offline" if m["conexao"] == "online" else "online"
+
+    conn.execute(
+        "UPDATE motoqueiros SET conexao=? WHERE id=?",
+        (novo_status, mid)
+    )
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("motorista"))
+
 @app.route("/motorista")
 def motorista():
     if "motorista_id" not in session:
@@ -2064,7 +2098,9 @@ def motorista():
       </div>
       <h2>🏍️ Painel do Motorista</h2>
       <div id="statusbox" class="pub-info">Carregando status...</div>
-      <button id="btnonline" class="pub-btn pub-green" onclick="alternarStatus()">ATIVAR ONLINE</button>
+      <form method="POST" action="/motorista/alternar-status">
+        <button id="btnonline" type="submit" class="pub-btn pub-green">ATIVAR ONLINE</button>
+      </form>
 
       <div class="pub-card">
         <h3>🚕 Corridas disponíveis</h3>
