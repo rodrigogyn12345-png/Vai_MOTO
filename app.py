@@ -439,7 +439,7 @@ def login():
         if admin and check_password_hash(admin["senha"], senha):
             session["admin_id"] = admin["id"]
             session["admin_usuario"] = admin["usuario"]
-            return redirect(url_for("dashboard"))
+            return redirect("/")
 
         flash("Usuário ou senha inválidos.", "erro")
 
