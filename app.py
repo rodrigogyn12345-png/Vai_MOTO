@@ -132,6 +132,29 @@ def iniciar_banco():
     except Exception:
         pass
 
+    # Corrige a senha do motorista de teste, se ele existir.
+    motorista_teste = conn.execute(
+        "SELECT id, senha FROM motoqueiros WHERE telefone = ?",
+        ("62993903299",)
+    ).fetchone()
+
+    if motorista_teste:
+        senha_ok = False
+        try:
+            if motorista_teste["senha"]:
+                senha_ok = check_password_hash(
+                    motorista_teste["senha"],
+                    "123456"
+                )
+        except Exception:
+            senha_ok = False
+
+        if not senha_ok:
+            conn.execute(
+                "UPDATE motoqueiros SET senha = ? WHERE telefone = ?",
+                (generate_password_hash("123456"), "62993903299")
+            )
+
     conn.commit()
     conn.close()
 
