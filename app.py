@@ -2052,7 +2052,7 @@ carregarCorridas();
     """)
 
 
-@app.route("/motorista/alternar-status", methods=["POST"])
+@app.route("/motorista/alternar-status", methods=["GET", "POST"])
 def motorista_alternar_status():
     mid = _motorista_logado()
     if not mid:
@@ -2098,9 +2098,7 @@ def motorista():
       </div>
       <h2>🏍️ Painel do Motorista</h2>
       <div id="statusbox" class="pub-info">Carregando status...</div>
-      <form method="POST" action="/motorista/alternar-status">
-        <button id="btnonline" type="submit" class="pub-btn pub-green">ATIVAR ONLINE</button>
-      </form>
+      <a id="btnonline" href="/motorista/alternar-status" class="pub-btn pub-green">ATIVAR ONLINE</a>
 
       <div class="pub-card">
         <h3>🚕 Corridas disponíveis</h3>
