@@ -2109,8 +2109,39 @@ async function status(){
   }
 }
 async function alternarStatus(){
-  const r=await fetch("/api/motorista/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({online:!online})});
-  const d=await r.json(); if(d.ok){status(); carregar();}
+  try{
+    const btn=document.getElementById("btnonline");
+    btn.disabled=true;
+    btn.textContent="ALTERANDO...";
+
+    const r=await fetch("/api/motorista/status",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({online:!online}),
+      cache:"no-store"
+    });
+
+    const d=await r.json();
+
+    if(!d.ok){
+      alert("Erro: "+(d.erro||"Não foi possível alterar o status."));
+      btn.disabled=false;
+      status();
+      return;
+    }
+
+    online=(d.conexao==="online");
+    await status();
+    await carregar();
+
+  }catch(e){
+    console.error(e);
+    alert("Erro de conexão ao ativar o motorista.");
+    status();
+  }finally{
+    const btn=document.getElementById("btnonline");
+    if(btn) btn.disabled=false;
+  }
 }
 async function carregar(){
   const r=await fetch("/api/corridas-disponiveis"); const d=await r.json();
