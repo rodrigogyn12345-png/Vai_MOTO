@@ -2229,13 +2229,19 @@ async function alternarStatus(){
   }
 }
 async function carregar(){
-  const r=await fetch("/api/corridas-disponiveis"); const d=await r.json();
-  const box=document.getElementById("disponiveis");
-  if(!d.ok){box.innerHTML=d.erro||"Erro";return;}
-  if(!d.corridas.length){box.innerHTML="Nenhuma corrida pendente no momento.";return;}
-  box.innerHTML=d.corridas.map(c=>`<div class="pub-info"><b>Corrida #${c.id}</b><br>📍 ${c.origem}<br>🏁 ${c.destino}<br>💰 R$ ${Number(c.valor).toFixed(2)}<br><button class="pub-btn pub-green" onclick="aceitar(${c.id})">ACEITAR CORRIDA</button></div>`).join("");
+  try{
+    const r=await fetch("/api/corridas-disponiveis?x="+Date.now(),{cache:"no-store"});
+    const d=await r.json();
+    const box=document.getElementById("disponiveis");
+    if(!d.ok){box.innerHTML=d.erro||"Erro";return;}
+    if(!d.corridas || !d.corridas.length){box.innerHTML="Nenhuma corrida pendente no momento.";return;}
+    box.innerHTML=d.corridas.map(c=>`<div class="pub-info"><b>🚕 Corrida #${c.id}</b><br>📍 ${c.origem}<br>🏁 ${c.destino}<br>💰 R$ ${Number(c.valor).toFixed(2)}<br><button class="pub-btn pub-green" onclick="aceitar(${c.id})">🏍️ ACEITAR CORRIDA</button></div>`).join("");
+  }catch(e){
+    console.error(e);
+    document.getElementById("disponiveis").innerHTML="Erro ao buscar corridas.";
+  }
 }
-async function aceitar(id){
+setInterval(carregar,3000);\nasync function aceitar(id){
   const r=await fetch("/api/corrida/"+id+"/aceitar",{method:"POST"});
   const d=await r.json(); alert(d.ok?"Corrida aceita!":(d.erro||"Erro")); status(); carregar(); ganhos();
 }
