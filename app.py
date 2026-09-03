@@ -3022,6 +3022,190 @@ def icone(nome):
     return send_from_directory("static", nome)
 
 
+# ===== ALERTA SONORO VAI_DE_MOTO =====
+@app.after_request
+def alerta_sonoro_motorista(response):
+    try:
+        if request.path == "/motorista":
+            tipo = response.headers.get("Content-Type", "")
+            if "text/html" in tipo:
+                texto = response.get_data(as_text=True)
+
+                alerta = r"""
+<script>
+(function(){
+  if (window.__vaiDeMotoSom) return;
+  window.__vaiDeMotoSom = true;
+
+  let audio = null;
+  let tocando = false;
+  let intervalo = null;
+  let ultimaQuantidade = Number(localStorage.getItem("vai_moto_qtd_corridas") || "0");
+
+  function criarAudio(){
+    if(!audio){
+      audio = new Audio("/static/chamada_vai_de_moto.wav");
+      audio.preload = "auto";
+      audio.volume = 1.0;
+    }
+    return audio;
+  }
+
+  function tocarChamada(){
+    if(tocando) return;
+
+    const a = criarAudio();
+    tocando = true;
+
+    function tocar(){
+      if(!tocando) return;
+
+      try{
+        a.currentTime = 0;
+        const p = a.play();
+
+        if(p){
+          p.catch(function(){
+            tocando = false;
+          });
+        }
+      }catch(e){
+        tocando = false;
+      }
+    }
+
+    tocar();
+
+    intervalo = setInterval(function(){
+      if(tocando) tocar();
+    }, 2500);
+  }
+
+  function pararChamada(){
+    tocando = false;
+
+    if(intervalo){
+      clearInterval(intervalo);
+      intervalo = null;
+    }
+
+    if(audio){
+      try{
+        audio.pause();
+        audio.currentTime = 0;
+      }catch(e){}
+    }
+  }
+
+  // Libera o áudio quando o motorista toca na tela.
+  document.addEventListener("click", function(){
+    try{
+      const a = criarAudio();
+      a.load();
+    }catch(e){}
+  }, {once:false});
+
+  async function verificarCorridas(){
+    try{
+      const r = await fetch("/api/corridas-disponiveis", {
+        cache: "no-store",
+        credentials: "same-origin"
+      });
+
+      if(!r.ok) return;
+
+      const d = await r.json();
+
+      if(!d.ok) return;
+
+      const quantidade = Array.isArray(d.corridas) ? d.corridas.length : 0;
+
+      // Nova corrida apareceu.
+      if(quantidade > ultimaQuantidade){
+        tocarChamada();
+      }
+
+      // Não existem mais corridas disponíveis.
+      if(quantidade === 0){
+        pararChamada();
+      }
+
+      ultimaQuantidade = quantidade;
+      localStorage.setItem(
+        "vai_moto_qtd_corridas",
+        String(quantidade)
+      );
+
+    }catch(e){}
+  }
+
+  // Se o motorista acabou de entrar na tela,
+  // verifica imediatamente.
+  verificarCorridas();
+
+  // Verifica novas corridas a cada 2 segundos.
+  setInterval(verificarCorridas, 2000);
+
+  // Se clicar em ACEITAR, para o toque.
+  document.addEventListener("submit", function(e){
+    const form = e.target;
+
+    if(form && form.action && form.action.includes("/motorista/aceitar/")){
+      pararChamada();
+      localStorage.setItem("vai_moto_qtd_corridas", "0");
+    }
+  });
+
+  // Botão manual para testar o som.
+  window.testarSomVaiDeMoto = function(){
+    tocarChamada();
+
+    setTimeout(function(){
+      pararChamada();
+    }, 6000);
+  };
+
+})();
+</script>
+"""
+
+                # Coloca o botão de teste antes do </body>.
+                botao = r"""
+<div style="margin:15px 0;text-align:center;">
+  <button type="button"
+          onclick="testarSomVaiDeMoto()"
+          style="
+            width:100%;
+            border:0;
+            border-radius:10px;
+            padding:14px;
+            background:#222;
+            color:white;
+            font-weight:bold;
+            font-size:15px;
+            cursor:pointer;">
+    🔊 TESTAR SOM DE CHAMADA
+  </button>
+</div>
+"""
+
+                if "testarSomVaiDeMoto" not in texto:
+                    if "</body>" in texto:
+                        texto = texto.replace(
+                            "</body>",
+                            botao + alerta + "</body>",
+                            1
+                        )
+                    else:
+                        texto += botao + alerta
+
+                    response.set_data(texto)
+
+    except Exception:
+        pass
+
+    return response
+
 if __name__ == "__main__":
     iniciar_banco()
 
