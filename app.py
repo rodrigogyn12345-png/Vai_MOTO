@@ -1978,7 +1978,7 @@ async function buscarDestino(){
     box.appendChild(b);
   });
 }
-async async function calcular(){
+async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
   const dLat=document.getElementById("dest_lat").value, dLon=document.getElementById("dest_lon").value;
   if(!aLat||!aLon){msg("Use o GPS para definir a origem.","erro");return;}
