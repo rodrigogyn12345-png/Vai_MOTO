@@ -85,18 +85,18 @@ def iniciar_banco():
     # Cria o administrador inicial somente se ainda não existir.
     admin = conn.execute(
         "SELECT id FROM admins WHERE usuario = ?",
-        ("admin",)
+        ("62993903299",)
     ).fetchone()
 
     if not admin:
         conn.execute(
             "INSERT INTO admins (usuario, senha) VALUES (?, ?)",
-            ("admin", generate_password_hash("123456"))
+            ("62993903299", generate_password_hash("123456"))
         )
     else:
         conn.execute(
             "UPDATE admins SET senha = ? WHERE usuario = ?",
-            (generate_password_hash("123456"), "admin")
+            (generate_password_hash("123456"), "62993903299")
         )
 
     try:
