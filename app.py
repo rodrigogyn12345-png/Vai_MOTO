@@ -1998,8 +1998,7 @@ async function usarGPS(){
         document.getElementById("origem").value=d.endereco;
         msg("Origem encontrada: "+d.endereco,"sucesso");
       }else{
-        msg("GPS ativado, mas não foi possível encontrar o nome da rua.
-Use o endereço manualmente.","alert");
+        msg("GPS ativado, mas não foi possível encontrar o nome da rua.\\nUse o endereço manualmente.","alert");
       }
     }catch(e){
       msg("GPS ativado. Digite a rua se o endereço não aparecer.","alert");
