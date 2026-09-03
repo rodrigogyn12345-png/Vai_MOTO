@@ -2061,12 +2061,29 @@ def motorista():
 <script>
 let online=false;
 async function status(){
-  const r=await fetch("/api/motorista/me"); const d=await r.json();
-  if(!d.ok)return;
-  online=d.conexao==="online";
-  document.getElementById("statusbox").innerHTML="Status: <b>"+(online?"🟢 ONLINE":"⚪ OFFLINE")+"</b>";
-  document.getElementById("btnonline").textContent=online?"DESATIVAR ONLINE":"ATIVAR ONLINE";
-  document.getElementById("btnonline").className="pub-btn "+(online?"pub-yellow":"pub-green");
+  try{
+    const r=await fetch("/api/motorista/me",{cache:"no-store"});
+    const d=await r.json();
+
+    if(!d.ok){
+      document.getElementById("statusbox").innerHTML="❌ "+(d.erro||"Erro ao consultar status");
+      return;
+    }
+
+    online = d.conexao === "online";
+
+    document.getElementById("statusbox").innerHTML =
+      "Status: <b>"+(online ? "🟢 ONLINE" : "⚪ OFFLINE")+"</b>";
+
+    const btn=document.getElementById("btnonline");
+    btn.textContent=online ? "DESATIVAR ONLINE" : "ATIVAR ONLINE";
+    btn.className="pub-btn "+(online ? "pub-yellow" : "pub-green");
+
+  }catch(e){
+    console.error(e);
+    document.getElementById("statusbox").innerHTML =
+      "❌ Erro ao carregar status";
+  }
 }
 async function alternarStatus(){
   const r=await fetch("/api/motorista/status",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({online:!online})});
