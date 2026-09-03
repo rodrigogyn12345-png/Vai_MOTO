@@ -1948,9 +1948,10 @@ def passageiro():
         <input id="origem_lat" type="hidden">
         <input id="origem_lon" type="hidden">
         <button class="pub-btn pub-blue" type="button" onclick="usarGPS()">🎯 USAR MINHA LOCALIZAÇÃO</button>
+         <small>O GPS tentará mostrar rua, número e bairro.</small>
 
         <h3>🏁 Destino</h3>
-        <input id="destino" class="pub-input" placeholder="Digite o endereço de destino">
+        <input id="destino" class="pub-input" placeholder="Rua, número, bairro ou endereço completo">
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
@@ -1977,14 +1978,33 @@ def passageiro():
 
 <script>
 function msg(t, cls="alert"){document.getElementById("mensagem").innerHTML='<div class="alert '+cls+'">'+t+'</div>';}
-function usarGPS(){
+async function usarGPS(){
   if(!navigator.geolocation){msg("Seu navegador não suporta GPS.","erro");return;}
   navigator.geolocation.getCurrentPosition(async p=>{
-    document.getElementById("origem_lat").value=p.coords.latitude;
-    document.getElementById("origem_lon").value=p.coords.longitude;
-    document.getElementById("origem").value=p.coords.latitude.toFixed(6)+", "+p.coords.longitude.toFixed(6);
-    msg("GPS da origem ativado.","sucesso");
-  }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000});
+    const lat=p.coords.latitude;
+    const lon=p.coords.longitude;
+    document.getElementById("origem_lat").value=lat;
+    document.getElementById("origem_lon").value=lon;
+    document.getElementById("origem").value=lat.toFixed(6)+", "+lon.toFixed(6);
+    msg("GPS localizado. Procurando rua e número...","sucesso");
+    try{
+      const r=await fetch("/api/endereco-gps",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({lat,lon})
+      });
+      const d=await r.json();
+      if(d.ok && d.endereco){
+        document.getElementById("origem").value=d.endereco;
+        msg("Origem encontrada: "+d.endereco,"sucesso");
+      }else{
+        msg("GPS ativado, mas não foi possível encontrar o nome da rua.
+Use o endereço manualmente.","alert");
+      }
+    }catch(e){
+      msg("GPS ativado. Digite a rua se o endereço não aparecer.","alert");
+    }
+  }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
 }
 async function buscarDestino(){
   const q=document.getElementById("destino").value.trim();
@@ -2058,6 +2078,10 @@ def motorista_alternar_status():
     if not mid:
         return redirect(url_for("login_motorista"))
 
+    acao = (request.args.get("acao") or request.form.get("acao") or "").strip().lower()
+    if acao not in ("online", "offline"):
+        acao = None
+
     conn = conectar()
     m = conn.execute(
         "SELECT status, conexao FROM motoqueiros WHERE id=?",
@@ -2075,11 +2099,14 @@ def motorista_alternar_status():
             '<div class="alert erro">Motorista ainda não foi aprovado.</div>'
         )
 
-    novo_status = "offline" if m["conexao"] == "online" else "online"
+    # Ação explícita: não dependemos de JavaScript para definir o estado.
+    # Sem ?acao, mantém o comportamento de alternar.
+    if acao is None:
+        acao = "offline" if m["conexao"] == "online" else "online"
 
     conn.execute(
         "UPDATE motoqueiros SET conexao=? WHERE id=?",
-        (novo_status, mid)
+        (acao, mid)
     )
     conn.commit()
     conn.close()
@@ -2091,14 +2118,38 @@ def motorista():
     if "motorista_id" not in session:
         return redirect(url_for("login_motorista"))
 
-    return _pagina_publica("Motorista", """
+    mid = _motorista_logado()
+    conn = conectar()
+    m = conn.execute(
+        "SELECT nome, status, conexao FROM motoqueiros WHERE id=?",
+        (mid,)
+    ).fetchone()
+    conn.close()
+
+    if not m or m["status"] != "aprovado":
+        session.clear()
+        return redirect(url_for("login_motorista"))
+
+    online_servidor = m["conexao"] == "online"
+    status_html = (
+        '<div class="pub-info">Status: <b>🟢 ONLINE</b></div>'
+        if online_servidor else
+        '<div class="pub-info">Status: <b>⚪ OFFLINE</b></div>'
+    )
+    botao_html = (
+        '<a id="btnonline" href="/motorista/alternar-status?acao=offline" class="pub-btn pub-yellow">DESATIVAR ONLINE</a>'
+        if online_servidor else
+        '<a id="btnonline" href="/motorista/alternar-status?acao=online" class="pub-btn pub-green">ATIVAR ONLINE</a>'
+    )
+
+    corpo_motorista = """
       <div class="pub-nav">
         <a href="/motorista">🏍️ Início</a>
         <a href="/logout-usuario">🚪 Sair</a>
       </div>
       <h2>🏍️ Painel do Motorista</h2>
-      <div id="statusbox" class="pub-info">Carregando status...</div>
-      <a id="btnonline" href="/motorista/alternar-status" class="pub-btn pub-green">ATIVAR ONLINE</a>
+      __STATUS_HTML__
+      __BOTAO_HTML__
 
       <div class="pub-card">
         <h3>🚕 Corridas disponíveis</h3>
@@ -2134,6 +2185,7 @@ async function status(){
 
     const btn=document.getElementById("btnonline");
     btn.textContent=online ? "DESATIVAR ONLINE" : "ATIVAR ONLINE";
+    btn.href=online ? "/motorista/alternar-status?acao=offline" : "/motorista/alternar-status?acao=online";
     btn.className="pub-btn "+(online ? "pub-yellow" : "pub-green");
 
   }catch(e){
@@ -2212,7 +2264,9 @@ async function ganhos(){
 status(); carregar(); minhasCorridas(); ganhos();
 setInterval(()=>{status();carregar();minhasCorridas();ganhos();},5000);
 </script>
-    """)
+    """
+    corpo_motorista = corpo_motorista.replace("__STATUS_HTML__", status_html).replace("__BOTAO_HTML__", botao_html)
+    return _pagina_publica("Motorista", corpo_motorista)
 
 
 def _json():
@@ -2232,23 +2286,90 @@ def _motorista_logado():
 @app.route("/api/buscar-enderecos", methods=["POST"])
 def api_buscar_enderecos():
     data = _json()
-    q = (data.get("q") or "").strip()
+    q = " ".join((data.get("q") or "").split()).strip()
     if not q:
         return {"ok": False, "resultados": []}
+
+    # Aceita rua, número, bairro, cidade, estado e CEP.
+    # Se o usuário não informar cidade, prioriza a cidade do aplicativo.
+    q_lower = q.lower()
+    if "aragoiania" not in q_lower and "aragoiânia" not in q_lower:
+        q_busca = q + ", Aragoiânia, Goiás, Brasil"
+    else:
+        q_busca = q
+
     try:
-        params = urlencode({"q": q, "format": "jsonv2", "limit": 5, "countrycodes": "br", "addressdetails": 1})
+        params = urlencode({
+            "q": q_busca,
+            "format": "jsonv2",
+            "limit": 7,
+            "countrycodes": "br",
+            "addressdetails": 1,
+            "dedupe": 1
+        })
         req = Request(
             "https://nominatim.openstreetmap.org/search?" + params,
-            headers={"User-Agent": "VAI_DE_MOTO/1.0 contato"}
+            headers={
+                "User-Agent": "VAI_DE_MOTO/1.0 (aplicativo de transporte local)"
+            }
         )
-        with urlopen(req, timeout=8) as resp:
+        with urlopen(req, timeout=10) as resp:
             arr = json.loads(resp.read().decode("utf-8"))
-        return {"ok": True, "resultados": [
-            {"display_name": x.get("display_name", ""), "lat": x.get("lat"), "lon": x.get("lon")}
-            for x in arr
-        ]}
+
+        resultados = []
+        for x in arr:
+            lat = x.get("lat")
+            lon = x.get("lon")
+            if lat and lon:
+                resultados.append({
+                    "display_name": x.get("display_name", ""),
+                    "lat": lat,
+                    "lon": lon
+                })
+        return {"ok": True, "resultados": resultados}
     except Exception:
-        return {"ok": False, "resultados": [], "erro": "Serviço de endereços indisponível."}
+        return {
+            "ok": False,
+            "resultados": [],
+            "erro": "Serviço de endereços indisponível. Tente novamente."
+        }
+
+
+@app.route("/api/endereco-gps", methods=["POST"])
+def api_endereco_gps():
+    data = _json()
+    lat = data.get("lat")
+    lon = data.get("lon")
+    if lat in (None, "") or lon in (None, ""):
+        return {"ok": False, "erro": "Coordenadas do GPS não informadas."}
+
+    try:
+        params = urlencode({
+            "lat": lat,
+            "lon": lon,
+            "format": "jsonv2",
+            "addressdetails": 1,
+            "zoom": 18
+        })
+        req = Request(
+            "https://nominatim.openstreetmap.org/reverse?" + params,
+            headers={
+                "User-Agent": "VAI_DE_MOTO/1.0 (aplicativo de transporte local)"
+            }
+        )
+        with urlopen(req, timeout=10) as resp:
+            x = json.loads(resp.read().decode("utf-8"))
+        return {
+            "ok": True,
+            "endereco": x.get("display_name", ""),
+            "lat": x.get("lat", lat),
+            "lon": x.get("lon", lon)
+        }
+    except Exception:
+        return {
+            "ok": False,
+            "erro": "Não foi possível transformar o GPS em endereço."
+        }
 
 
 @app.route("/api/calcular-corrida", methods=["POST"])
