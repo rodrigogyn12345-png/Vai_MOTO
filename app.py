@@ -93,6 +93,11 @@ def iniciar_banco():
             "INSERT INTO admins (usuario, senha) VALUES (?, ?)",
             ("admin", generate_password_hash("123456"))
         )
+    else:
+        conn.execute(
+            "UPDATE admins SET senha = ? WHERE usuario = ?",
+            (generate_password_hash("123456"), "admin")
+        )
 
     try:
         conn.execute("ALTER TABLE corridas_vai ADD COLUMN pagamento TEXT DEFAULT 'DINHEIRO'")
