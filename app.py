@@ -2112,167 +2112,524 @@ def motorista_alternar_status():
 
     return redirect(url_for("motorista"))
 
+
 @app.route("/motorista")
 def motorista():
     if "motorista_id" not in session:
         return redirect(url_for("login_motorista"))
 
     mid = _motorista_logado()
+
     conn = conectar()
-    m = conn.execute(
-        "SELECT nome, status, conexao FROM motoqueiros WHERE id=?",
-        (mid,)
-    ).fetchone()
-    conn.close()
+
+    m = conn.execute("""
+        SELECT id,nome,status,conexao
+        FROM motoqueiros
+        WHERE id=?
+    """, (mid,)).fetchone()
 
     if not m or m["status"] != "aprovado":
+        conn.close()
         session.clear()
         return redirect(url_for("login_motorista"))
 
-    online_servidor = m["conexao"] == "online"
-    status_html = (
-        '<div id="statusbox" class="pub-info">Status: <b>🟢 ONLINE</b></div>'
-        if online_servidor else
-        '<div id="statusbox" class="pub-info">Status: <b>⚪ OFFLINE</b></div>'
+    # Corridas disponíveis para qualquer motorista aprovado e online
+    disponiveis = conn.execute("""
+        SELECT
+            c.id,
+            c.origem,
+            c.destino,
+            c.valor,
+            c.valor_motorista,
+            c.distancia_km,
+            c.pagamento,
+            c.status,
+            c.criado_em
+        FROM corridas_vai c
+        WHERE c.status='PENDENTE'
+          AND c.motorista_id IS NULL
+        ORDER BY c.id DESC
+        LIMIT 20
+    """).fetchall()
+
+    # Corridas deste motorista
+    minhas = conn.execute("""
+        SELECT
+            c.id,
+            c.origem,
+            c.destino,
+            c.valor,
+            c.valor_motorista,
+            c.distancia_km,
+            c.pagamento,
+            c.status,
+            c.criado_em,
+            p.nome AS passageiro_nome,
+            p.telefone AS passageiro_telefone
+        FROM corridas_vai c
+        LEFT JOIN passageiros p
+          ON p.id=c.passageiro_id
+        WHERE c.motorista_id=?
+        ORDER BY c.id DESC
+        LIMIT 20
+    """, (mid,)).fetchall()
+
+    hoje = conn.execute("""
+        SELECT
+            COUNT(*) AS quantidade,
+            COALESCE(SUM(valor_motorista),0) AS total
+        FROM corridas_vai
+        WHERE motorista_id=?
+          AND status='CONCLUIDA'
+          AND date(concluido_em)=date('now','localtime')
+    """, (mid,)).fetchone()
+
+    geral = conn.execute("""
+        SELECT
+            COALESCE(SUM(valor_motorista),0) AS total
+        FROM corridas_vai
+        WHERE motorista_id=?
+          AND status='CONCLUIDA'
+    """, (mid,)).fetchone()
+
+    conn.close()
+
+    import html
+
+    nome = html.escape(str(m["nome"] or "Motorista"))
+    online = m["conexao"] == "online"
+
+    status_box = (
+        '<div class="motor-status online">🟢 ONLINE</div>'
+        if online else
+        '<div class="motor-status offline">⚪ OFFLINE</div>'
     )
-    botao_html = (
-        '<a id="btnonline" href="/motorista/alternar-status?acao=offline" class="pub-btn pub-yellow">DESATIVAR ONLINE</a>'
-        if online_servidor else
-        '<a id="btnonline" href="/motorista/alternar-status?acao=online" class="pub-btn pub-green">ATIVAR ONLINE</a>'
+
+    botao_status = (
+        '<a class="motor-btn amarelo" href="/motorista/alternar-status?acao=offline">DESATIVAR ONLINE</a>'
+        if online else
+        '<a class="motor-btn verde" href="/motorista/alternar-status?acao=online">ATIVAR ONLINE</a>'
     )
 
-    corpo_motorista = """
-      <div class="pub-nav">
-        <a href="/motorista">🏍️ Início</a>
-        <a href="/logout-usuario">🚪 Sair</a>
-      </div>
-      <h2>🏍️ Painel do Motorista</h2>
-      __STATUS_HTML__
-      __BOTAO_HTML__
+    disponiveis_html = ""
 
-      <div class="pub-card">
-        <h3>🚕 Corridas disponíveis</h3>
-        <div id="disponiveis">Ative o online para receber corridas.</div>
-      </div>
+    if not disponiveis:
+        disponiveis_html = """
+        <div class="vazio">
+            🚕 Nenhuma corrida disponível neste momento.
+            <br><small>Esta tela atualiza automaticamente.</small>
+        </div>
+        """
+    else:
+        for c in disponiveis:
+            valor = float(c["valor"] or 0)
+            valor_motorista = float(c["valor_motorista"] or 0)
+            distancia = float(c["distancia_km"] or 0)
 
-      <div class="pub-card">
-        <h3>🚕 Minhas corridas</h3>
-        <div id="minhas-corridas">Carregando...</div>
-      </div>
+            origem = html.escape(str(c["origem"] or ""))
+            destino = html.escape(str(c["destino"] or ""))
+            pagamento = html.escape(str(c["pagamento"] or "DINHEIRO"))
 
-      <div class="pub-card">
-        <h3>💰 Meus ganhos</h3>
-        <div id="ganhos">Carregando...</div>
-      </div>
+            disponiveis_html += f"""
+            <div class="corrida disponivel">
+                <div class="corrida-topo">
+                    <strong>🚕 CORRIDA #{c["id"]}</strong>
+                    <span class="pendente">PENDENTE</span>
+                </div>
 
-<script>
-let online=false;
-async function status(){
-  try{
-    const r=await fetch("/api/motorista/me",{cache:"no-store"});
-    const d=await r.json();
+                <div class="linha">📍 <b>Origem:</b><br>{origem}</div>
+                <div class="linha">🏁 <b>Destino:</b><br>{destino}</div>
+                <div class="linha">📏 <b>Distância:</b> {distancia:.2f} km</div>
+                <div class="linha">💳 <b>Pagamento:</b> {pagamento}</div>
 
-    if(!d.ok){
-      document.getElementById("statusbox").innerHTML="❌ "+(d.erro||"Erro ao consultar status");
-      return;
-    }
+                <div class="valores">
+                    <div>
+                        <small>Passageiro paga</small>
+                        <strong>R$ {valor:.2f}</strong>
+                    </div>
+                    <div>
+                        <small>Você recebe</small>
+                        <strong>R$ {valor_motorista:.2f}</strong>
+                    </div>
+                </div>
 
-    online = d.conexao === "online";
+                <form method="POST" action="/motorista/aceitar/{c["id"]}">
+                    <button class="motor-btn verde" type="submit">
+                        🏍️ ACEITAR CORRIDA
+                    </button>
+                </form>
+            </div>
+            """
 
-    document.getElementById("statusbox").innerHTML =
-      "Status: <b>"+(online ? "🟢 ONLINE" : "⚪ OFFLINE")+"</b>";
+    minhas_html = ""
 
-    const btn=document.getElementById("btnonline");
-    btn.textContent=online ? "DESATIVAR ONLINE" : "ATIVAR ONLINE";
-    btn.href=online ? "/motorista/alternar-status?acao=offline" : "/motorista/alternar-status?acao=online";
-    btn.className="pub-btn "+(online ? "pub-yellow" : "pub-green");
+    if not minhas:
+        minhas_html = """
+        <div class="vazio">
+            Você ainda não aceitou nenhuma corrida.
+        </div>
+        """
+    else:
+        for c in minhas:
+            origem = html.escape(str(c["origem"] or ""))
+            destino = html.escape(str(c["destino"] or ""))
+            passageiro = html.escape(str(c["passageiro_nome"] or "Passageiro"))
+            pagamento = html.escape(str(c["pagamento"] or "DINHEIRO"))
 
-  }catch(e){
-    console.error(e);
-    document.getElementById("statusbox").innerHTML =
-      "❌ Erro ao carregar status";
-  }
-}
-async function alternarStatus(){
-  try{
-    const btn=document.getElementById("btnonline");
-    btn.disabled=true;
-    btn.textContent="ALTERANDO...";
+            valor = float(c["valor"] or 0)
+            valor_motorista = float(c["valor_motorista"] or 0)
 
-    const r=await fetch("/api/motorista/status",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({online:!online}),
-      cache:"no-store"
-    });
+            acoes = ""
 
-    const d=await r.json();
+            if c["status"] == "ACEITA":
+                acoes = f"""
+                <form method="POST" action="/motorista/iniciar/{c["id"]}">
+                    <button class="motor-btn azul" type="submit">
+                        🚦 INICIAR CORRIDA
+                    </button>
+                </form>
+                """
 
-    if(!d.ok){
-      alert("Erro: "+(d.erro||"Não foi possível alterar o status."));
-      btn.disabled=false;
-      status();
-      return;
-    }
+            elif c["status"] == "EM_ANDAMENTO":
+                acoes = f"""
+                <form method="POST" action="/motorista/concluir/{c["id"]}">
+                    <button class="motor-btn verde" type="submit">
+                        ✅ CONCLUIR CORRIDA
+                    </button>
+                </form>
+                """
 
-    online=(d.conexao==="online");
-    await status();
-    await carregar();
+            minhas_html += f"""
+            <div class="corrida">
+                <div class="corrida-topo">
+                    <strong>🚕 CORRIDA #{c["id"]}</strong>
+                    <span>{html.escape(str(c["status"]))}</span>
+                </div>
 
-  }catch(e){
-    console.error(e);
-    alert("Erro de conexão ao ativar o motorista.");
-    status();
-  }finally{
-    const btn=document.getElementById("btnonline");
-    if(btn) btn.disabled=false;
-  }
-}
-async function carregar(){
-  try{
-    const r=await fetch("/api/corridas-disponiveis?x="+Date.now(),{cache:"no-store"});
-    const d=await r.json();
-    const box=document.getElementById("disponiveis");
-    if(!d.ok){box.innerHTML=d.erro||"Erro";return;}
-    if(!d.corridas || !d.corridas.length){box.innerHTML="Nenhuma corrida pendente no momento.";return;}
-    box.innerHTML=d.corridas.map(c=>`<div class="pub-info"><b>🚕 Corrida #${c.id}</b><br>📍 ${c.origem}<br>🏁 ${c.destino}<br>💰 R$ ${Number(c.valor).toFixed(2)}<br><button class="pub-btn pub-green" onclick="aceitar(${c.id})">🏍️ ACEITAR CORRIDA</button></div>`).join("");
-  }catch(e){
-    console.error(e);
-    document.getElementById("disponiveis").innerHTML="Erro ao buscar corridas.";
-  }
-}
-setInterval(carregar,3000);
-async function aceitar(id){
-  const r=await fetch("/api/corrida/"+id+"/aceitar",{method:"POST"});
-  const d=await r.json(); alert(d.ok?"Corrida aceita!":(d.erro||"Erro")); status(); carregar(); ganhos();
-}
-async function acao(id,acao){
-  const r=await fetch("/api/corrida/"+id+"/"+acao,{method:"POST"});
-  const d=await r.json(); alert(d.ok?"Atualizado!":(d.erro||"Erro")); carregar(); ganhos();
-}
-async function minhasCorridas(){
-  const r=await fetch("/api/motorista/minhas-corridas"); const d=await r.json();
-  const box=document.getElementById("minhas-corridas");
-  if(!d.ok){box.innerHTML=d.erro||"Erro";return;}
-  if(!d.corridas.length){box.innerHTML="Nenhuma corrida atribuída.";return;}
-  box.innerHTML=d.corridas.map(c=>{
-    let acao="";
-    if(c.status==="ACEITA") acao='<button class="pub-btn pub-green" onclick="acao('+c.id+',\'iniciar\')">🚦 INICIAR</button>';
-    if(c.status==="EM_ANDAMENTO") acao='<button class="pub-btn pub-green" onclick="acao('+c.id+',\'concluir\')">✅ CONCLUIR</button>';
-    return '<div class="pub-info"><b>Corrida #'+c.id+'</b><br>👤 '+(c.passageiro_nome||"Passageiro")+'<br>📍 '+c.origem+'<br>🏁 '+c.destino+'<br>💰 R$ '+Number(c.valor).toFixed(2)+'<br>📌 '+c.status+'<br>'+acao+'</div>';
-  }).join("");
-}
-async function ganhos(){
-  const r=await fetch("/api/motorista/ganhos"); const d=await r.json();
-  if(!d.ok)return;
-  document.getElementById("ganhos").innerHTML="<b>Hoje:</b> "+d.corridas_hoje+" corridas<br><b>Ganhos:</b> R$ "+Number(d.total_hoje).toFixed(2)+"<br><b>Total concluído:</b> R$ "+Number(d.total_geral).toFixed(2);
-}
-status(); carregar(); minhasCorridas(); ganhos();
-setInterval(()=>{status();carregar();minhasCorridas();ganhos();},5000);
-</script>
-    """
-    corpo_motorista = corpo_motorista.replace("__STATUS_HTML__", status_html).replace("__BOTAO_HTML__", botao_html)
+                <div class="linha">👤 <b>Passageiro:</b> {passageiro}</div>
+                <div class="linha">📍 <b>Origem:</b><br>{origem}</div>
+                <div class="linha">🏁 <b>Destino:</b><br>{destino}</div>
+                <div class="linha">💳 <b>Pagamento:</b> {pagamento}</div>
+
+                <div class="valores">
+                    <div>
+                        <small>Corrida</small>
+                        <strong>R$ {valor:.2f}</strong>
+                    </div>
+                    <div>
+                        <small>Seu ganho</small>
+                        <strong>R$ {valor_motorista:.2f}</strong>
+                    </div>
+                </div>
+
+                {acoes}
+            </div>
+            """
+
+    corpo_motorista = f"""
+<style>
+.motor-status {{
+    padding:16px;
+    border-radius:14px;
+    font-size:20px;
+    font-weight:800;
+    text-align:center;
+    margin:12px 0;
+}}
+
+.motor-status.online {{
+    background:#d9f7df;
+    color:#137333;
+}}
+
+.motor-status.offline {{
+    background:#eeeeee;
+    color:#555;
+}}
+
+.motor-btn {{
+    display:block;
+    width:100%;
+    box-sizing:border-box;
+    padding:16px;
+    border:0;
+    border-radius:14px;
+    color:white;
+    text-align:center;
+    text-decoration:none;
+    font-size:17px;
+    font-weight:800;
+    margin-top:12px;
+    cursor:pointer;
+}}
+
+.motor-btn.verde {{
+    background:#16833b;
+}}
+
+.motor-btn.azul {{
+    background:#1769aa;
+}}
+
+.motor-btn.amarelo {{
+    background:#d99a00;
+    color:#111;
+}}
+
+.corrida {{
+    background:#f4f6f8;
+    border-radius:16px;
+    padding:17px;
+    margin:13px 0;
+    border:1px solid #e0e3e6;
+}}
+
+.corrida.disponivel {{
+    border:2px solid #16833b;
+    background:#f7fff9;
+}}
+
+.corrida-topo {{
+    display:flex;
+    justify-content:space-between;
+    gap:8px;
+    align-items:center;
+    margin-bottom:12px;
+    font-size:17px;
+}}
+
+.corrida-topo span {{
+    background:#e9ecef;
+    border-radius:20px;
+    padding:5px 9px;
+    font-size:12px;
+    font-weight:800;
+}}
+
+.pendente {{
+    background:#fff0b3 !important;
+    color:#7a5b00;
+}}
+
+.linha {{
+    margin:9px 0;
+    line-height:1.4;
+}}
+
+.valores {{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    margin-top:14px;
+}}
+
+.valores div {{
+    background:white;
+    border-radius:12px;
+    padding:12px;
+    text-align:center;
+}}
+
+.valores small {{
+    display:block;
+    color:#666;
+    margin-bottom:5px;
+}}
+
+.valores strong {{
+    display:block;
+    font-size:20px;
+}}
+
+.vazio {{
+    background:#f4f6f8;
+    border-radius:14px;
+    padding:20px;
+    text-align:center;
+    color:#555;
+}}
+
+.motor-menu {{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:8px;
+    margin-bottom:15px;
+}}
+
+.motor-menu a {{
+    background:#eeeeee;
+    color:#222;
+    padding:12px;
+    border-radius:12px;
+    text-decoration:none;
+    text-align:center;
+    font-weight:700;
+}}
+
+.ganhos-box {{
+    background:#f4f6f8;
+    border-radius:16px;
+    padding:18px;
+}}
+
+.ganho-num {{
+    font-size:25px;
+    font-weight:800;
+}}
+
+@media(max-width:600px) {{
+    .valores {{
+        grid-template-columns:1fr;
+    }}
+}}
+</style>
+
+<div class="motor-menu">
+    <a href="/motorista">🏍️ Início</a>
+    <a href="/logout-usuario">🚪 Sair</a>
+</div>
+
+<h2>🏍️ Painel do Motorista</h2>
+
+<div class="pub-info">
+    Olá, <b>{nome}</b>!
+</div>
+
+{status_box}
+
+{botao_status}
+
+<div class="pub-card">
+    <h3>🚕 CORRIDAS DISPONÍVEIS</h3>
+    <p>As corridas pendentes aparecem aqui automaticamente.</p>
+    {disponiveis_html}
+</div>
+
+<div class="pub-card">
+    <h3>🚕 MINHAS CORRIDAS</h3>
+    {minhas_html}
+</div>
+
+<div class="pub-card">
+    <h3>💰 MEUS GANHOS</h3>
+
+    <div class="ganhos-box">
+        <p>📅 Corridas concluídas hoje</p>
+        <div class="ganho-num">{int(hoje["quantidade"] or 0)}</div>
+
+        <p>💵 Ganhos de hoje</p>
+        <div class="ganho-num">R$ {float(hoje["total"] or 0):.2f}</div>
+
+        <p>💰 Total concluído</p>
+        <div class="ganho-num">R$ {float(geral["total"] or 0):.2f}</div>
+    </div>
+</div>
+
+<div class="pub-card">
+    <a class="motor-btn azul" href="/motorista">
+        🔄 ATUALIZAR CORRIDAS
+    </a>
+</div>
+
+<meta http-equiv="refresh" content="5">
+"""
+
     return _pagina_publica("Motorista", corpo_motorista)
+
+
+@app.route("/motorista/aceitar/<int:id>", methods=["POST"])
+def motorista_aceitar(id):
+    mid = _motorista_logado()
+
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+
+    m = conn.execute("""
+        SELECT status,conexao
+        FROM motoqueiros
+        WHERE id=?
+    """, (mid,)).fetchone()
+
+    if not m or m["status"] != "aprovado":
+        conn.close()
+        return redirect(url_for("login_motorista"))
+
+    if m["conexao"] != "online":
+        conn.close()
+        return _pagina_publica(
+            "Motorista",
+            '<div class="alert erro">Fique ONLINE para aceitar uma corrida.</div>'
+            '<a class="pub-btn pub-green" href="/motorista">Voltar</a>'
+        )
+
+    cur = conn.execute("""
+        UPDATE corridas_vai
+        SET motorista_id=?, status='ACEITA'
+        WHERE id=?
+          AND status='PENDENTE'
+          AND motorista_id IS NULL
+    """, (mid, id))
+
+    conn.commit()
+    conn.close()
+
+    if cur.rowcount == 0:
+        return _pagina_publica(
+            "Corrida",
+            '<div class="alert erro">Essa corrida já foi aceita por outro motorista.</div>'
+            '<a class="pub-btn pub-green" href="/motorista">Voltar</a>'
+        )
+
+    return redirect(url_for("motorista"))
+
+
+@app.route("/motorista/iniciar/<int:id>", methods=["POST"])
+def motorista_iniciar(id):
+    mid = _motorista_logado()
+
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+
+    cur = conn.execute("""
+        UPDATE corridas_vai
+        SET status='EM_ANDAMENTO'
+        WHERE id=?
+          AND motorista_id=?
+          AND status='ACEITA'
+    """, (id, mid))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("motorista"))
+
+
+@app.route("/motorista/concluir/<int:id>", methods=["POST"])
+def motorista_concluir(id):
+    mid = _motorista_logado()
+
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+
+    cur = conn.execute("""
+        UPDATE corridas_vai
+        SET status='CONCLUIDA',
+            concluido_em=datetime('now','localtime')
+        WHERE id=?
+          AND motorista_id=?
+          AND status='EM_ANDAMENTO'
+    """, (id, mid))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("motorista"))
 
 
 def _json():
