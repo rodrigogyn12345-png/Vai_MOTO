@@ -1947,7 +1947,7 @@ def passageiro():
         <input id="origem" class="pub-input" placeholder="Sua localização">
         <input id="origem_lat" type="hidden">
         <input id="origem_lon" type="hidden">
-        <button class="pub-btn pub-blue" type="button" onclick="usarGPS()">🎯 USAR MINHA LOCALIZAÇÃO</button>
+        <button class="pub-btn pub-blue" type="button" onclick="navigator.geolocation.getCurrentPosition(function(p){document.getElementById("origem_lat").value=p.coords.latitude;document.getElementById("origem_lon").value=p.coords.longitude;document.getElementById("origem").value=p.coords.latitude.toFixed(6)+", "+p.coords.longitude.toFixed(6);alert("Localização encontrada!");},function(e){alert("GPS não conseguiu localizar. Ative a localização precisa e tente novamente.");},{enableHighAccuracy:true,timeout:20000,maximumAge:0})">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
         <h3>🏁 Destino</h3>
