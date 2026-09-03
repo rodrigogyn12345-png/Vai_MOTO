@@ -2241,7 +2241,8 @@ async function carregar(){
     document.getElementById("disponiveis").innerHTML="Erro ao buscar corridas.";
   }
 }
-setInterval(carregar,3000);\nasync function aceitar(id){
+setInterval(carregar,3000);
+async function aceitar(id){
   const r=await fetch("/api/corrida/"+id+"/aceitar",{method:"POST"});
   const d=await r.json(); alert(d.ok?"Corrida aceita!":(d.erro||"Erro")); status(); carregar(); ganhos();
 }
