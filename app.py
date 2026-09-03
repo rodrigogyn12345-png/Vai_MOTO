@@ -418,6 +418,7 @@ Senha inicial: <b>123456</b>
 
 
 @app.route("/login", methods=["GET", "POST"])
+@app.route("/admin/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         usuario = request.form.get("usuario", "").strip()
