@@ -2131,9 +2131,9 @@ def motorista():
 
     online_servidor = m["conexao"] == "online"
     status_html = (
-        '<div class="pub-info">Status: <b>🟢 ONLINE</b></div>'
+        '<div id="statusbox" class="pub-info">Status: <b>🟢 ONLINE</b></div>'
         if online_servidor else
-        '<div class="pub-info">Status: <b>⚪ OFFLINE</b></div>'
+        '<div id="statusbox" class="pub-info">Status: <b>⚪ OFFLINE</b></div>'
     )
     botao_html = (
         '<a id="btnonline" href="/motorista/alternar-status?acao=offline" class="pub-btn pub-yellow">DESATIVAR ONLINE</a>'
