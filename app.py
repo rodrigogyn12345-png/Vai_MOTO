@@ -1824,8 +1824,8 @@ def _pagina_publica(titulo, corpo, manifesto=None):
     <script>
     if ("serviceWorker" in navigator) {{
       window.addEventListener("load", function() {{
-        navigator.serviceWorker.register("/static/pwa/service-worker.js").catch(function(e) {{
-          console.log("Service Worker:", e);
+        navigator.serviceWorker.register("/service-worker.js").catch(function(e) {{
+          console.log("PWA:", e);
         }});
       }});
     }}
