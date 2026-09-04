@@ -3554,16 +3554,37 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
+  function falarNovaCorrida(){
+    try{
+      if(!("speechSynthesis" in window)) return;
+
+      window.speechSynthesis.cancel();
+
+      const fala = new SpeechSynthesisUtterance(
+        "VAI DE MOTO! Nova corrida disponível."
+      );
+
+      fala.lang = "pt-BR";
+      fala.rate = 0.9;
+      fala.pitch = 1.0;
+      fala.volume = 1.0;
+
+      window.speechSynthesis.speak(fala);
+    }catch(e){}
+  }
+
   function tocarChamada(){
     if(tocando) return;
 
     tocando = true;
     liberarAudio();
 
+    // Anuncia a nova corrida
+    falarNovaCorrida();
+
     function chamada(){
       if(!tocando) return;
 
-      // Toque forte de chamada
       beep(880, 0.00, 0.32);
       beep(1175, 0.38, 0.32);
       beep(880, 0.76, 0.32);
