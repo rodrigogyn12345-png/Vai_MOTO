@@ -3067,50 +3067,144 @@ def _motorista_logado():
 def api_buscar_enderecos():
     data = _json()
     q = " ".join((data.get("q") or "").split()).strip()
+
     if not q:
         return {"ok": False, "resultados": []}
 
-    # Busca em todo o Brasil.
-    # O usuário pode informar rua, número, bairro, cidade,
-    # estado ou CEP. Não força mais Aragoiânia.
-    q_busca = q
+    resultados = []
 
-    try:
-        params = urlencode({
-            "q": q_busca,
-            "format": "jsonv2",
-            "limit": 7,
-            "countrycodes": "br",
-            "addressdetails": 1,
-            "dedupe": 1
-        })
-        req = Request(
-            "https://nominatim.openstreetmap.org/search?" + params,
-            headers={
-                "User-Agent": "VAI_DE_MOTO/1.0 (aplicativo de transporte local)"
-            }
-        )
-        with urlopen(req, timeout=10) as resp:
-            arr = json.loads(resp.read().decode("utf-8"))
+    def adicionar(lat, lon, nome):
+        if not lat or not lon:
+            return
 
-        resultados = []
-        for x in arr:
-            lat = x.get("lat")
-            lon = x.get("lon")
-            if lat and lon:
-                resultados.append({
-                    "display_name": x.get("display_name", ""),
-                    "lat": lat,
-                    "lon": lon
-                })
-        return {"ok": True, "resultados": resultados}
-    except Exception:
-        return {
-            "ok": False,
-            "resultados": [],
-            "erro": "Serviço de endereços indisponível. Tente novamente."
+        item = {
+            "display_name": nome or "",
+            "lat": str(lat),
+            "lon": str(lon)
         }
 
+        chave = (round(float(lat), 6), round(float(lon), 6))
+
+        for r in resultados:
+            try:
+                chave2 = (
+                    round(float(r["lat"]), 6),
+                    round(float(r["lon"]), 6)
+                )
+                if chave == chave2:
+                    return
+            except Exception:
+                pass
+
+        resultados.append(item)
+
+    # =========================================================
+    # 1) NOMINATIM / OPENSTREETMAP
+    # =========================================================
+    consultas = [
+        q,
+        q + ", Brasil"
+    ]
+
+    for consulta in consultas:
+        try:
+            params = urlencode({
+                "q": consulta,
+                "format": "jsonv2",
+                "limit": 10,
+                "countrycodes": "br",
+                "addressdetails": 1,
+                "dedupe": 1,
+                "accept-language": "pt-BR"
+            })
+
+            req = Request(
+                "https://nominatim.openstreetmap.org/search?" + params,
+                headers={
+                    "User-Agent":
+                        "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                }
+            )
+
+            with urlopen(req, timeout=10) as resp:
+                arr = json.loads(
+                    resp.read().decode("utf-8")
+                )
+
+            for x in arr:
+                adicionar(
+                    x.get("lat"),
+                    x.get("lon"),
+                    x.get("display_name", "")
+                )
+
+            if len(resultados) >= 10:
+                break
+
+        except Exception:
+            continue
+
+    # =========================================================
+    # 2) PHOTON - SEGUNDA TENTATIVA
+    # =========================================================
+    if len(resultados) < 3:
+        try:
+            params = urlencode({
+                "q": q,
+                "limit": 10,
+                "lang": "pt"
+            })
+
+            req = Request(
+                "https://photon.komoot.io/api/?" + params,
+                headers={
+                    "User-Agent":
+                        "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                }
+            )
+
+            with urlopen(req, timeout=10) as resp:
+                dados = json.loads(
+                    resp.read().decode("utf-8")
+                )
+
+            for feature in dados.get("features", []):
+                geom = feature.get("geometry", {})
+                coords = geom.get("coordinates", [])
+
+                if len(coords) >= 2:
+                    lon = coords[0]
+                    lat = coords[1]
+
+                    props = feature.get("properties", {})
+
+                    partes = []
+
+                    for chave in (
+                        "name",
+                        "street",
+                        "housenumber",
+                        "district",
+                        "city",
+                        "state",
+                        "country"
+                    ):
+                        valor = props.get(chave)
+
+                        if valor and str(valor) not in partes:
+                            partes.append(str(valor))
+
+                    nome = ", ".join(partes)
+
+                    adicionar(lat, lon, nome)
+
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "resultados": resultados[:10]
+    }
 
 @app.route("/api/endereco-gps", methods=["POST"])
 def api_endereco_gps():
