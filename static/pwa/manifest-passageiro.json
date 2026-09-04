@@ -1,6 +1,6 @@
 {
   "name": "VAI_DE_MOTO — PASSAGEIRO",
-  "short_name": "VAI_DE_MOTO PASSAGEIRO",
+  "short_name": "PASSAGEIRO",
   "start_url": "/passageiro",
   "scope": "/",
   "display": "standalone",
@@ -18,5 +18,6 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "id": "/passageiro-app"
 }

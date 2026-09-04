@@ -1,6 +1,6 @@
 {
   "name": "VAI_DE_MOTO — MOTORISTA",
-  "short_name": "VAI_DE_MOTO MOTORISTA",
+  "short_name": "MOTORISTA",
   "start_url": "/motorista",
   "scope": "/",
   "display": "standalone",
@@ -18,5 +18,6 @@
       "sizes": "512x512",
       "type": "image/png"
     }
-  ]
+  ],
+  "id": "/motorista-app"
 }
