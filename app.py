@@ -150,6 +150,10 @@ def iniciar_banco():
         conn.execute("ALTER TABLE corridas_vai ADD COLUMN valor_motorista REAL DEFAULT 0")
     except Exception:
         pass
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN etapa TEXT DEFAULT 'AGUARDANDO'")
+    except Exception:
+        pass
 
     # Corrige a senha do motorista de teste, se ele existir.
     motorista_teste = conn.execute(
@@ -2542,6 +2546,7 @@ def motorista():
             c.distancia_km,
             c.pagamento,
             c.status,
+            c.etapa,
             c.criado_em,
             p.nome AS passageiro_nome,
             p.telefone AS passageiro_telefone
@@ -2660,7 +2665,23 @@ def motorista():
 
             acoes = ""
 
-            if c["status"] == "ACEITA":
+            etapa = str(c["etapa"] or "AGUARDANDO")
+
+            if c["status"] == "ACEITA" and etapa in ("AGUARDANDO", ""):
+                acoes = f"""
+                <a class="motor-btn azul"
+                   href="https://www.google.com/maps/dir/?api=1&destination={origem.replace(" ", "+")}&travelmode=driving"
+                   target="_blank">
+                    🧭 IR ATÉ O PASSAGEIRO
+                </a>
+                <form method="POST" action="/motorista/cheguei/{c["id"]}">
+                    <button class="motor-btn amarelo" type="submit">
+                        📍 CHEGUEI AO PASSAGEIRO
+                    </button>
+                </form>
+                """
+
+            elif c["status"] == "ACEITA" and etapa == "CHEGOU":
                 acoes = f"""
                 <form method="POST" action="/motorista/iniciar/{c["id"]}">
                     <button class="motor-btn azul" type="submit">
@@ -2671,9 +2692,14 @@ def motorista():
 
             elif c["status"] == "EM_ANDAMENTO":
                 acoes = f"""
+                <a class="motor-btn azul"
+                   href="https://www.google.com/maps/dir/?api=1&destination={destino.replace(" ", "+")}&travelmode=driving"
+                   target="_blank">
+                    🏁 IR ATÉ O DESTINO
+                </a>
                 <form method="POST" action="/motorista/concluir/{c["id"]}">
                     <button class="motor-btn verde" type="submit">
-                        ✅ CONCLUIR CORRIDA
+                        ✅ FINALIZAR CORRIDA
                     </button>
                 </form>
                 """
@@ -2979,6 +3005,7 @@ def motorista_iniciar(id):
         WHERE id=?
           AND motorista_id=?
           AND status='ACEITA'
+          AND etapa='CHEGOU'
     """, (id, mid))
 
     conn.commit()
@@ -3297,6 +3324,24 @@ def api_aceitar_corrida(id):
     if cur.rowcount == 0:
         return {"ok": False, "erro": "Essa corrida já foi aceita por outro motorista."}
     return {"ok": True}
+
+
+@app.route("/motorista/cheguei/<int:id>", methods=["POST"])
+def motorista_cheguei(id):
+    mid = _motorista_logado()
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+    cur = conn.execute("""
+        UPDATE corridas_vai
+        SET etapa='CHEGOU'
+        WHERE id=? AND motorista_id=? AND status='ACEITA'
+    """, (id, mid))
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("motorista"))
 
 
 @app.route("/api/corrida/<int:id>/iniciar", methods=["POST"])
