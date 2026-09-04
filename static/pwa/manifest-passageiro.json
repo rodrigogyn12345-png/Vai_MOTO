@@ -1,6 +1,6 @@
 {
-  "name": "VAI_DE_MOTO - Passageiro",
-  "short_name": "VAI_DE_MOTO Passageiro",
+  "name": "VAI_DE_MOTO — PASSAGEIRO",
+  "short_name": "VAI_DE_MOTO PASSAGEIRO",
   "start_url": "/passageiro",
   "scope": "/",
   "display": "standalone",

@@ -1,6 +1,6 @@
 {
-  "name": "VAI_DE_MOTO - Motorista",
-  "short_name": "VAI_DE_MOTO Motorista",
+  "name": "VAI_DE_MOTO — MOTORISTA",
+  "short_name": "VAI_DE_MOTO MOTORISTA",
   "start_url": "/motorista",
   "scope": "/",
   "display": "standalone",
