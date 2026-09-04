@@ -2608,6 +2608,7 @@ def motorista():
         for c in disponiveis:
             valor = float(c["valor"] or 0)
             valor_motorista = float(c["valor_motorista"] or 0)
+            taxa_app = valor * 0.09
             distancia = float(c["distancia_km"] or 0)
 
             origem = html.escape(str(c["origem"] or ""))
@@ -2721,6 +2722,15 @@ def motorista():
                         <small>Corrida</small>
                         <strong>R$ {valor:.2f}</strong>
                     </div>
+                    <div>
+                        <small>Taxa VAI_DE_MOTO (9%)</small>
+                        <strong>R$ {taxa_app:.2f}</strong>
+                    </div>
+                    <div>
+                        <small>Seu ganho</small>
+                        <strong>R$ {valor_motorista:.2f}</strong>
+                    </div>
+                </div>
                     <div>
                         <small>Seu ganho</small>
                         <strong>R$ {valor_motorista:.2f}</strong>
