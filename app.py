@@ -1200,9 +1200,17 @@ def corridas():
 
                 <p>🏁 <b>Destino:</b> {destino}</p>
 
-                <p>💰 <b>Valor:</b>
-                    R$ {valor:.2f}
-                </p>
+                <p>💰 <b>Valor pago:</b>
+                R$ {valor:.2f}
+            </p>
+
+            <p>🏢 <b>Taxa VAI_DE_MOTO (9%):</b>
+                R$ {round(valor * 0.09, 2):.2f}
+            </p>
+
+            <p>🏍️ <b>Motorista recebe (91%):</b>
+                R$ {round(valor * 0.91, 2):.2f}
+            </p>
             </div>
 
             <div class="corrida-acoes">
