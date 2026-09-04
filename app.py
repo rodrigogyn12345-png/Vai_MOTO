@@ -2663,6 +2663,7 @@ def motorista():
 
             valor = float(c["valor"] or 0)
             valor_motorista = float(c["valor_motorista"] or 0)
+            taxa_app = valor * 0.09
 
             acoes = ""
 
