@@ -2249,8 +2249,8 @@ def login_passageiro():
             session["passageiro_id"] = p["id"]
             session["passageiro_nome"] = p["nome"]
             return redirect(url_for("passageiro"))
-        return _pagina_publica("Login", '<div class="alert erro">Telefone, senha inválidos ou conta bloqueada.</div>' + PASSAGEIRO_LOGIN_FORM)
-    return _pagina_publica("Login", PASSAGEIRO_LOGIN_FORM)
+        return _pagina_publica("Login", '<div class="alert erro">Telefone, senha inválidos ou conta bloqueada.</div>' + PASSAGEIRO_LOGIN_FORM, manifesto="passageiro")
+    return _pagina_publica("Login", PASSAGEIRO_LOGIN_FORM, manifesto="passageiro")
 
 
 PASSAGEIRO_LOGIN_FORM = """
@@ -2276,13 +2276,13 @@ def login_motorista():
         conn.close()
         if m and m["senha"] and check_password_hash(m["senha"], senha):
             if m["status"] != "aprovado":
-                return _pagina_publica("Login", '<div class="alert">Seu cadastro ainda não foi aprovado pelo administrador.</div>' + MOTORISTA_LOGIN_FORM)
+                return _pagina_publica("Login", '<div class="alert">Seu cadastro ainda não foi aprovado pelo administrador.</div>' + MOTORISTA_LOGIN_FORM, manifesto="motorista")
             session.clear()
             session["motorista_id"] = m["id"]
             session["motorista_nome"] = m["nome"]
             return redirect(url_for("motorista"))
-        return _pagina_publica("Login", '<div class="alert erro">Telefone ou senha inválidos.</div>' + MOTORISTA_LOGIN_FORM)
-    return _pagina_publica("Login", MOTORISTA_LOGIN_FORM)
+        return _pagina_publica("Login", '<div class="alert erro">Telefone ou senha inválidos.</div>' + MOTORISTA_LOGIN_FORM, manifesto="motorista")
+    return _pagina_publica("Login", MOTORISTA_LOGIN_FORM, manifesto="motorista")
 
 
 MOTORISTA_LOGIN_FORM = """
