@@ -1,0 +1,22 @@
+{
+  "name": "VAI_DE_MOTO - Passageiro",
+  "short_name": "VAI_DE_MOTO Passageiro",
+  "start_url": "/passageiro",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#ffd400",
+  "description": "Aplicativo VAI_DE_MOTO para passageiros",
+  "icons": [
+    {
+      "src": "/static/pwa/icone-passageiro-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/pwa/icone-passageiro-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

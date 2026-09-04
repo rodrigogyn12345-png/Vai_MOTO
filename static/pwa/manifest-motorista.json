@@ -1,0 +1,22 @@
+{
+  "name": "VAI_DE_MOTO - Motorista",
+  "short_name": "VAI_DE_MOTO Motorista",
+  "start_url": "/motorista",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#050505",
+  "theme_color": "#ffd400",
+  "description": "Aplicativo VAI_DE_MOTO para motoristas",
+  "icons": [
+    {
+      "src": "/static/pwa/icone-motorista-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/pwa/icone-motorista-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

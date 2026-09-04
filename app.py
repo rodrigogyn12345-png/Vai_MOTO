@@ -1787,31 +1787,55 @@ def _distancia_km(lat1, lon1, lat2, lon2):
         return 0.0
 
 
-def _pagina_publica(titulo, corpo):
-    html = """
+def _pagina_publica(titulo, corpo, manifesto=None):
+    if manifesto == "motorista":
+        manifest_href = "/static/pwa/manifest-motorista.json"
+    elif manifesto == "passageiro":
+        manifest_href = "/static/pwa/manifest-passageiro.json"
+    else:
+        manifest_href = "/manifest.json"
+
+    html = f"""
+    <link rel="manifest" href="{manifest_href}">
+    <meta name="theme-color" content="#111111">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="VAI_DE_MOTO">
+
     <style>
-    .pub-wrap{max-width:760px;margin:25px auto;padding:0 14px}
-    .pub-card{background:#fff;border-radius:22px;padding:24px;box-shadow:0 3px 14px rgba(0,0,0,.08);margin-bottom:18px}
-    .pub-title{font-size:32px;font-weight:800;margin:5px 0 8px}
-    .pub-sub{color:#666;margin-bottom:20px}
-    .pub-btn{display:block;width:100%;padding:15px;border:0;border-radius:13px;background:#111;color:#fff;text-align:center;text-decoration:none;font-size:17px;font-weight:700;margin-top:10px}
-    .pub-green{background:#16833b}
-    .pub-blue{background:#1769aa}
-    .pub-yellow{background:#d99a00;color:#111}
-    .pub-input{width:100%;padding:14px;border:1px solid #ccc;border-radius:12px;font-size:16px;margin:6px 0 12px}
-    .pub-label{font-weight:700;display:block;margin-top:10px}
-    .pub-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-    .pub-info{background:#f4f6f8;padding:15px;border-radius:14px;margin:10px 0}
-    .pub-price{font-size:34px;font-weight:800}
-    .pub-nav{display:flex;gap:8px;overflow:auto;margin-bottom:15px}
-    .pub-nav a{white-space:nowrap;background:#eee;color:#222;text-decoration:none;padding:11px 14px;border-radius:12px}
-    @media(max-width:650px){.pub-grid{grid-template-columns:1fr}}
+    .pub-wrap{{max-width:760px;margin:25px auto;padding:0 14px}}
+    .pub-card{{background:#fff;border-radius:22px;padding:24px;box-shadow:0 3px 14px rgba(0,0,0,.08);margin-bottom:18px}}
+    .pub-title{{font-size:32px;font-weight:800;margin:5px 0 8px}}
+    .pub-sub{{color:#666;margin-bottom:20px}}
+    .pub-btn{{display:block;width:100%;padding:15px;border:0;border-radius:13px;background:#111;color:#fff;text-align:center;text-decoration:none;font-size:17px;font-weight:700;margin-top:10px}}
+    .pub-green{{background:#16833b}}
+    .pub-blue{{background:#1769aa}}
+    .pub-yellow{{background:#d99a00;color:#111}}
+    .pub-input{{width:100%;padding:14px;border:1px solid #ccc;border-radius:12px;font-size:16px;margin:6px 0 12px}}
+    .pub-label{{font-weight:700;display:block;margin-top:10px}}
+    .pub-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+    .pub-info{{background:#f4f6f8;padding:15px;border-radius:14px;margin:10px 0}}
+    .pub-price{{font-size:34px;font-weight:800}}
+    .pub-nav{{display:flex;gap:8px;overflow:auto;margin-bottom:15px}}
+    .pub-nav a{{white-space:nowrap;background:#eee;color:#222;text-decoration:none;padding:11px 14px;border-radius:12px}}
+    @media(max-width:650px){{.pub-grid{{grid-template-columns:1fr}}}}
     </style>
+
+    <script>
+    if ("serviceWorker" in navigator) {{
+      window.addEventListener("load", function() {{
+        navigator.serviceWorker.register("/static/pwa/service-worker.js").catch(function(e) {{
+          console.log("Service Worker:", e);
+        }});
+      }});
+    }}
+    </script>
+
     <div class="pub-wrap">
       <div class="pub-card">
         <div class="pub-title">🏍️ VAI_DE_MOTO</div>
         <div class="pub-sub">Transporte de moto rápido e local</div>
-    """ + corpo + """
+        {corpo}
       </div>
     </div>
     """
@@ -2423,7 +2447,7 @@ async function carregarCorridas(){
 }
 carregarCorridas();
 </script>
-    """)
+    """, manifesto="passageiro")
 
 
 @app.route("/motorista/alternar-status", methods=["GET", "POST"])
@@ -2889,7 +2913,7 @@ def motorista():
 <meta http-equiv="refresh" content="5">
 """
 
-    return _pagina_publica("Motorista", corpo_motorista)
+    return _pagina_publica("Motorista", corpo_motorista, manifesto="motorista")
 
 
 @app.route("/motorista/aceitar/<int:id>", methods=["POST"])
@@ -3370,6 +3394,24 @@ def manifest():
         "static",
         "manifest.json",
         mimetype="application/manifest+json"
+    )
+
+@app.route("/manifest-motorista.json")
+def manifest_motorista():
+    return send_from_directory(
+        os.path.join(app.root_path, "static", "pwa"),
+        "manifest-motorista.json",
+        mimetype="application/manifest+json",
+        max_age=0
+    )
+
+@app.route("/manifest-passageiro.json")
+def manifest_passageiro():
+    return send_from_directory(
+        os.path.join(app.root_path, "static", "pwa"),
+        "manifest-passageiro.json",
+        mimetype="application/manifest+json",
+        max_age=0
     )
 
 @app.route("/icone/<path:nome>")
