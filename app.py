@@ -3070,13 +3070,10 @@ def api_buscar_enderecos():
     if not q:
         return {"ok": False, "resultados": []}
 
-    # Aceita rua, número, bairro, cidade, estado e CEP.
-    # Se o usuário não informar cidade, prioriza a cidade do aplicativo.
-    q_lower = q.lower()
-    if "aragoiania" not in q_lower and "aragoiânia" not in q_lower:
-        q_busca = q + ", Aragoiânia, Goiás, Brasil"
-    else:
-        q_busca = q
+    # Busca em todo o Brasil.
+    # O usuário pode informar rua, número, bairro, cidade,
+    # estado ou CEP. Não força mais Aragoiânia.
+    q_busca = q
 
     try:
         params = urlencode({
