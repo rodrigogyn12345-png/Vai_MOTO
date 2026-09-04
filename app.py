@@ -3034,51 +3034,92 @@ def alerta_sonoro_motorista(response):
                 alerta = r"""
 <script>
 (function(){
-  if (window.__vaiDeMotoSom) return;
+  if(window.__vaiDeMotoSom) return;
   window.__vaiDeMotoSom = true;
 
-  let audio = null;
+  let ctx = null;
   let tocando = false;
   let intervalo = null;
-  let ultimaQuantidade = Number(localStorage.getItem("vai_moto_qtd_corridas") || "0");
+  let ultimaQuantidade = Number(
+    localStorage.getItem("vai_moto_qtd_corridas") || "0"
+  );
 
-  function criarAudio(){
-    if(!audio){
-      audio = new Audio("/static/chamada_vai_de_moto.wav");
-      audio.preload = "auto";
-      audio.volume = 1.0;
-    }
-    return audio;
+  function liberarAudio(){
+    try{
+      if(!ctx){
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      if(ctx.state === "suspended"){
+        ctx.resume();
+      }
+
+      // Pequeno som silencioso para liberar o contexto no Android.
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+
+      g.gain.value = 0.0001;
+      o.connect(g);
+      g.connect(ctx.destination);
+
+      o.start();
+      o.stop(ctx.currentTime + 0.03);
+    }catch(e){}
+  }
+
+  function beep(freq, inicio, duracao){
+    try{
+      if(!ctx){
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+
+      if(ctx.state === "suspended"){
+        ctx.resume();
+      }
+
+      const agora = ctx.currentTime;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+
+      o.type = "sine";
+      o.frequency.setValueAtTime(freq, agora + inicio);
+
+      g.gain.setValueAtTime(0.0001, agora + inicio);
+      g.gain.exponentialRampToValueAtTime(
+        0.75,
+        agora + inicio + 0.025
+      );
+      g.gain.exponentialRampToValueAtTime(
+        0.0001,
+        agora + inicio + duracao
+      );
+
+      o.connect(g);
+      g.connect(ctx.destination);
+
+      o.start(agora + inicio);
+      o.stop(agora + inicio + duracao + 0.05);
+    }catch(e){}
   }
 
   function tocarChamada(){
     if(tocando) return;
 
-    const a = criarAudio();
     tocando = true;
+    liberarAudio();
 
-    function tocar(){
+    function chamada(){
       if(!tocando) return;
 
-      try{
-        a.currentTime = 0;
-        const p = a.play();
-
-        if(p){
-          p.catch(function(){
-            tocando = false;
-          });
-        }
-      }catch(e){
-        tocando = false;
-      }
+      // Toque forte de chamada
+      beep(880, 0.00, 0.32);
+      beep(1175, 0.38, 0.32);
+      beep(880, 0.76, 0.32);
+      beep(1175, 1.14, 0.32);
     }
 
-    tocar();
-
-    intervalo = setInterval(function(){
-      if(tocando) tocar();
-    }, 2500);
+    chamada();
+    intervalo = setInterval(chamada, 2500);
   }
 
   function pararChamada(){
@@ -3088,22 +3129,16 @@ def alerta_sonoro_motorista(response):
       clearInterval(intervalo);
       intervalo = null;
     }
-
-    if(audio){
-      try{
-        audio.pause();
-        audio.currentTime = 0;
-      }catch(e){}
-    }
   }
 
-  // Libera o áudio quando o motorista toca na tela.
+  // Qualquer toque do motorista libera o áudio.
   document.addEventListener("click", function(){
-    try{
-      const a = criarAudio();
-      a.load();
-    }catch(e){}
-  }, {once:false});
+    liberarAudio();
+  });
+
+  document.addEventListener("touchstart", function(){
+    liberarAudio();
+  }, {passive:true});
 
   async function verificarCorridas(){
     try{
@@ -3118,19 +3153,20 @@ def alerta_sonoro_motorista(response):
 
       if(!d.ok) return;
 
-      const quantidade = Array.isArray(d.corridas) ? d.corridas.length : 0;
+      const quantidade = Array.isArray(d.corridas)
+        ? d.corridas.length
+        : 0;
 
-      // Nova corrida apareceu.
       if(quantidade > ultimaQuantidade){
         tocarChamada();
       }
 
-      // Não existem mais corridas disponíveis.
       if(quantidade === 0){
         pararChamada();
       }
 
       ultimaQuantidade = quantidade;
+
       localStorage.setItem(
         "vai_moto_qtd_corridas",
         String(quantidade)
@@ -3139,37 +3175,39 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
-  // Se o motorista acabou de entrar na tela,
-  // verifica imediatamente.
   verificarCorridas();
-
-  // Verifica novas corridas a cada 2 segundos.
   setInterval(verificarCorridas, 2000);
 
-  // Se clicar em ACEITAR, para o toque.
   document.addEventListener("submit", function(e){
     const form = e.target;
 
-    if(form && form.action && form.action.includes("/motorista/aceitar/")){
+    if(
+      form &&
+      form.action &&
+      form.action.includes("/motorista/aceitar/")
+    ){
       pararChamada();
-      localStorage.setItem("vai_moto_qtd_corridas", "0");
+
+      localStorage.setItem(
+        "vai_moto_qtd_corridas",
+        "0"
+      );
     }
   });
 
-  // Botão manual para testar o som.
   window.testarSomVaiDeMoto = function(){
+    liberarAudio();
     tocarChamada();
 
     setTimeout(function(){
       pararChamada();
-    }, 6000);
+    }, 8000);
   };
 
 })();
 </script>
 """
 
-                # Coloca o botão de teste antes do </body>.
                 botao = r"""
 <div style="margin:15px 0;text-align:center;">
   <button type="button"
