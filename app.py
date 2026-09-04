@@ -1,4 +1,8 @@
-from flask import send_from_directory
+from pathlib import Path
+from flask import send_from_directory, send_file
+import os
+import uuid
+from werkzeug.utils import secure_filename
 from flask import Flask, request, redirect, url_for, session, render_template_string, flash
 import sqlite3
 import json
@@ -10,6 +14,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
 app.secret_key = "VAI_DE_MOTO_CHAVE_TROCAR_DEPOIS"
+app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024
 
 DB = "vai_de_moto.db"
 LIMITE_MOTOQUEIROS = 20
@@ -119,6 +124,20 @@ def iniciar_banco():
         conn.execute("ALTER TABLE motoqueiros ADD COLUMN senha TEXT DEFAULT ''")
     except Exception:
         pass
+
+    # Documentos do motorista
+    for coluna in (
+        "foto_motorista",
+        "cnh_frente",
+        "cnh_verso",
+        "crlv"
+    ):
+        try:
+            conn.execute(
+                f"ALTER TABLE motoqueiros ADD COLUMN {coluna} TEXT DEFAULT ''"
+            )
+        except Exception:
+            pass
     try:
         conn.execute("ALTER TABLE corridas_vai ADD COLUMN distancia_km REAL DEFAULT 0")
     except Exception:
@@ -475,6 +494,50 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.route("/admin/motorista/<int:id>/documento/<campo>")
+@login_obrigatorio
+def documento_motorista(id, campo):
+    campos_permitidos = {
+        "foto_motorista": "foto_motorista",
+        "cnh_frente": "cnh_frente",
+        "cnh_verso": "cnh_verso",
+        "crlv": "crlv",
+    }
+
+    if campo not in campos_permitidos:
+        return "Documento inválido.", 404
+
+    conn = conectar()
+    motorista = conn.execute(
+        "SELECT nome, foto_motorista, cnh_frente, cnh_verso, crlv FROM motoqueiros WHERE id=?",
+        (id,)
+    ).fetchone()
+    conn.close()
+
+    if not motorista:
+        return "Motorista não encontrado.", 404
+
+    caminho = motorista[campos_permitidos[campo]]
+
+    if not caminho:
+        return "Documento não enviado.", 404
+
+    arquivo = Path(caminho)
+
+    if not arquivo.is_file():
+        return "Arquivo do documento não encontrado.", 404
+
+    pasta_base = Path("documentos_motoristas").resolve()
+    arquivo_real = arquivo.resolve()
+
+    try:
+        arquivo_real.relative_to(pasta_base)
+    except ValueError:
+        return "Arquivo inválido.", 403
+
+    return send_file(str(arquivo_real))
+
+
 @app.route("/")
 @login_obrigatorio
 def dashboard():
@@ -652,6 +715,31 @@ def motoqueiros():
                 {m["observacao"] or "-"}
             </td>
             <td>
+                <a class="btn btn-azul"
+                   href="{url_for('documento_motorista', id=m['id'], campo='foto_motorista')}"
+                   target="_blank">
+                   📷 Foto
+                </a>
+
+                <a class="btn btn-azul"
+                   href="{url_for('documento_motorista', id=m['id'], campo='cnh_frente')}"
+                   target="_blank">
+                   🪪 CNH Frente
+                </a>
+
+                <a class="btn btn-azul"
+                   href="{url_for('documento_motorista', id=m['id'], campo='cnh_verso')}"
+                   target="_blank">
+                   🪪 CNH Verso
+                </a>
+
+                <a class="btn btn-azul"
+                   href="{url_for('documento_motorista', id=m['id'], campo='crlv')}"
+                   target="_blank">
+                   🛵 CRLV
+                </a>
+            </td>
+            <td>
                 <a class="btn btn-verde"
                    href="{url_for('alterar_status', id=m['id'], status='aprovado')}">
                    Aprovar
@@ -684,7 +772,7 @@ def motoqueiros():
     if not linhas:
         linhas = """
         <tr>
-            <td colspan="10" style="text-align:center">
+            <td colspan="11" style="text-align:center">
                 Nenhum motoqueiro cadastrado.
             </td>
         </tr>
@@ -742,6 +830,7 @@ def motoqueiros():
                 <th>Status</th>
                 <th>Conexão</th>
                 <th>Observação</th>
+                <th>Documentos</th>
                 <th>Ações</th>
             </tr>
             {linhas}
@@ -1804,30 +1893,110 @@ PASSAGEIRO_CADASTRO_FORM = """
 
 MOTORISTA_CADASTRO_FORM = """
 <h2>🏍️ Cadastro de motorista</h2>
-<p>Após o cadastro, o administrador precisa aprovar o motorista.</p>
-<form method="post">
-<label class="pub-label">Nome *</label>
-<input class="pub-input" name="nome" required placeholder="Nome completo">
+
+<p>
+Após o cadastro, o administrador irá conferir seus dados e documentos
+antes de liberar o acesso para trabalhar.
+</p>
+
+<form method="post" enctype="multipart/form-data">
+
+<label class="pub-label">Nome completo *</label>
+<input class="pub-input"
+       name="nome"
+       required
+       placeholder="Nome completo">
+
 <label class="pub-label">Telefone *</label>
-<input class="pub-input" name="telefone" required placeholder="(62) 99999-9999">
+<input class="pub-input"
+       name="telefone"
+       required
+       placeholder="(62) 99999-9999">
+
 <label class="pub-label">CPF *</label>
-<input class="pub-input" name="cpf" required placeholder="000.000.000-00">
+<input class="pub-input"
+       name="cpf"
+       required
+       placeholder="000.000.000-00">
+
 <label class="pub-label">Modelo da moto *</label>
-<input class="pub-input" name="moto" required placeholder="Honda CG 160">
+<input class="pub-input"
+       name="moto"
+       required
+       placeholder="Honda CG 160">
+
 <label class="pub-label">Placa *</label>
-<input class="pub-input" name="placa" required placeholder="ABC1D23">
+<input class="pub-input"
+       name="placa"
+       required
+       placeholder="ABC1D23">
+
 <label class="pub-label">Localização *</label>
-<input class="pub-input" name="localizacao" required placeholder="Cidade / bairro">
+<input class="pub-input"
+       name="localizacao"
+       required
+       placeholder="Cidade / bairro">
+
+<hr>
+
+<h3>🔐 Documentos para aprovação</h3>
+
+<p>
+Envie fotos nítidas dos documentos. Os documentos serão analisados
+pelo administrador antes da aprovação.
+</p>
+
+<label class="pub-label">📷 Foto do motorista *</label>
+<input class="pub-input"
+       type="file"
+       name="foto_motorista"
+       accept="image/jpeg,image/png,image/webp"
+       required>
+
+<label class="pub-label">🪪 CNH - frente *</label>
+<input class="pub-input"
+       type="file"
+       name="cnh_frente"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<label class="pub-label">🪪 CNH - verso *</label>
+<input class="pub-input"
+       type="file"
+       name="cnh_verso"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<label class="pub-label">🛵 CRLV *</label>
+<input class="pub-input"
+       type="file"
+       name="crlv"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<hr>
+
 <label class="pub-label">Senha *</label>
-<input class="pub-input" name="senha" type="password" minlength="6" required placeholder="Mínimo 6 caracteres">
-<button class="pub-btn pub-blue" type="submit">ENVIAR CADASTRO</button>
+<input class="pub-input"
+       name="senha"
+       type="password"
+       minlength="6"
+       required
+       placeholder="Mínimo 6 caracteres">
+
+<button class="pub-btn pub-blue" type="submit">
+ENVIAR CADASTRO
+</button>
+
 </form>
 """
 
 
 @app.route("/cadastro/motorista", methods=["GET", "POST"])
 def cadastro_motorista():
+
     if request.method == "POST":
+
         nome = request.form.get("nome", "").strip()
         telefone = request.form.get("telefone", "").strip()
         cpf = request.form.get("cpf", "").strip()
@@ -1836,33 +2005,211 @@ def cadastro_motorista():
         localizacao = request.form.get("localizacao", "").strip()
         senha = request.form.get("senha", "")
 
-        if not all([nome, telefone, cpf, moto, placa, localizacao, senha]):
-            return _pagina_publica("Cadastro", '<div class="alert erro">Preencha todos os campos.</div>' + MOTORISTA_CADASTRO_FORM)
+        foto_motorista = request.files.get("foto_motorista")
+        cnh_frente = request.files.get("cnh_frente")
+        cnh_verso = request.files.get("cnh_verso")
+        crlv = request.files.get("crlv")
+
+        if not all([
+            nome,
+            telefone,
+            cpf,
+            moto,
+            placa,
+            localizacao,
+            senha
+        ]):
+            return _pagina_publica(
+                "Cadastro",
+                '<div class="alert erro">Preencha todos os campos.</div>'
+                + MOTORISTA_CADASTRO_FORM
+            )
+
+        if not all([
+            foto_motorista,
+            cnh_frente,
+            cnh_verso,
+            crlv
+        ]):
+            return _pagina_publica(
+                "Cadastro",
+                '<div class="alert erro">Envie todos os documentos obrigatórios.</div>'
+                + MOTORISTA_CADASTRO_FORM
+            )
+
         if len(senha) < 6:
-            return _pagina_publica("Cadastro", '<div class="alert erro">A senha deve ter pelo menos 6 caracteres.</div>' + MOTORISTA_CADASTRO_FORM)
+            return _pagina_publica(
+                "Cadastro",
+                '<div class="alert erro">A senha deve ter pelo menos 6 caracteres.</div>'
+                + MOTORISTA_CADASTRO_FORM
+            )
+
+        extensoes_permitidas = {
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".webp",
+            ".pdf"
+        }
+
+        arquivos = {
+            "foto_motorista": foto_motorista,
+            "cnh_frente": cnh_frente,
+            "cnh_verso": cnh_verso,
+            "crlv": crlv
+        }
+
+        for nome_campo, arquivo in arquivos.items():
+
+            if not arquivo or not arquivo.filename:
+                return _pagina_publica(
+                    "Cadastro",
+                    '<div class="alert erro">Arquivo inválido.</div>'
+                    + MOTORISTA_CADASTRO_FORM
+                )
+
+            extensao = os.path.splitext(
+                arquivo.filename.lower()
+            )[1]
+
+            if extensao not in extensoes_permitidas:
+                return _pagina_publica(
+                    "Cadastro",
+                    '<div class="alert erro">'
+                    'Formato de arquivo não permitido. '
+                    'Use JPG, PNG, WEBP ou PDF.'
+                    '</div>'
+                    + MOTORISTA_CADASTRO_FORM
+                )
 
         conn = conectar()
+
         try:
-            if conn.execute("SELECT id FROM motoqueiros WHERE telefone=?", (telefone,)).fetchone():
-                return _pagina_publica("Cadastro", '<div class="alert erro">Telefone já cadastrado.</div>' + MOTORISTA_CADASTRO_FORM)
-            total = conn.execute("SELECT COUNT(*) AS n FROM motoqueiros").fetchone()["n"]
+
+            if conn.execute(
+                "SELECT id FROM motoqueiros WHERE telefone=?",
+                (telefone,)
+            ).fetchone():
+
+                return _pagina_publica(
+                    "Cadastro",
+                    '<div class="alert erro">Telefone já cadastrado.</div>'
+                    + MOTORISTA_CADASTRO_FORM
+                )
+
+            total = conn.execute(
+                "SELECT COUNT(*) AS n FROM motoqueiros"
+            ).fetchone()["n"]
+
             if total >= LIMITE_MOTOQUEIROS:
-                return _pagina_publica("Cadastro", '<div class="alert erro">Limite de 20 motoqueiros atingido.</div>' + MOTORISTA_CADASTRO_FORM)
-            conn.execute("""
+
+                return _pagina_publica(
+                    "Cadastro",
+                    '<div class="alert erro">'
+                    'Limite de 20 motoqueiros atingido.'
+                    '</div>'
+                    + MOTORISTA_CADASTRO_FORM
+                )
+
+            # Primeiro cria o motorista para obter o ID.
+            cur = conn.execute("""
                 INSERT INTO motoqueiros
-                (nome, telefone, cpf, moto, placa, localizacao, observacao, status, conexao, senha)
+                (
+                    nome,
+                    telefone,
+                    cpf,
+                    moto,
+                    placa,
+                    localizacao,
+                    observacao,
+                    status,
+                    conexao,
+                    senha
+                )
                 VALUES (?, ?, ?, ?, ?, ?, '', 'pendente', 'offline', ?)
-            """, (nome, telefone, cpf, moto, placa, localizacao, generate_password_hash(senha)))
+            """, (
+                nome,
+                telefone,
+                cpf,
+                moto,
+                placa,
+                localizacao,
+                generate_password_hash(senha)
+            ))
+
+            motorista_id = cur.lastrowid
+
+            # Pasta protegida, fora de static.
+            pasta = Path("documentos_motoristas") / str(motorista_id)
+            pasta.mkdir(parents=True, exist_ok=True)
+
+            caminhos = {}
+
+            for nome_campo, arquivo in arquivos.items():
+
+                extensao = os.path.splitext(
+                    arquivo.filename.lower()
+                )[1]
+
+                nome_arquivo = (
+                    nome_campo
+                    + "_"
+                    + uuid.uuid4().hex
+                    + extensao
+                )
+
+                caminho = pasta / nome_arquivo
+
+                arquivo.save(str(caminho))
+
+                caminhos[nome_campo] = str(caminho)
+
+            conn.execute("""
+                UPDATE motoqueiros
+                SET
+                    foto_motorista=?,
+                    cnh_frente=?,
+                    cnh_verso=?,
+                    crlv=?
+                WHERE id=?
+            """, (
+                caminhos["foto_motorista"],
+                caminhos["cnh_frente"],
+                caminhos["cnh_verso"],
+                caminhos["crlv"],
+                motorista_id
+            ))
+
             conn.commit()
+
+        except Exception:
+
+            conn.rollback()
+            raise
+
         finally:
             conn.close()
 
-        return _pagina_publica("Cadastro enviado", """
-          <div class="alert sucesso">Cadastro enviado. Aguarde a aprovação do administrador.</div>
-          <a class="pub-btn pub-blue" href="/login-motorista">ENTRAR COMO MOTORISTA</a>
-        """)
+        return _pagina_publica(
+            "Cadastro enviado",
+            """
+            <div class="alert sucesso">
+            ✅ Cadastro enviado com sucesso.<br><br>
+            📄 Seus documentos foram enviados para análise.<br>
+            👨‍💼 Aguarde a aprovação do administrador.
+            </div>
 
-    return _pagina_publica("Cadastro", MOTORISTA_CADASTRO_FORM)
+            <a class="pub-btn pub-blue"
+               href="/login-motorista">
+               ENTRAR COMO MOTORISTA
+            </a>
+            """
+        )
+
+    return _pagina_publica(
+        "Cadastro",
+        MOTORISTA_CADASTRO_FORM
+    )
 
 
 @app.route("/login-passageiro", methods=["GET", "POST"])
