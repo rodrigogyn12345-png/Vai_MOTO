@@ -3155,7 +3155,7 @@ async function carregarCorridas(){
     </div>
   `).join("");
 
-  async function cancelarCorrida(id){
+  window.cancelarCorrida = async function(id){
     if(!confirm("Tem certeza que deseja cancelar esta corrida?")){
       return;
     }
