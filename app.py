@@ -3168,16 +3168,22 @@ def api_buscar_enderecos():
     resultados = []
 
     def adicionar(lat, lon, nome):
-        if not lat or not lon:
+        if lat in (None, "") or lon in (None, ""):
+            return
+
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception:
             return
 
         item = {
             "display_name": nome or "",
-            "lat": str(lat),
-            "lon": str(lon)
+            "lat": str(lat_f),
+            "lon": str(lon_f)
         }
 
-        chave = (round(float(lat), 6), round(float(lon), 6))
+        chave = (round(lat_f, 6), round(lon_f, 6))
 
         for r in resultados:
             try:
@@ -3195,10 +3201,17 @@ def api_buscar_enderecos():
     # =========================================================
     # 1) NOMINATIM / OPENSTREETMAP
     # =========================================================
-    consultas = [
-        q,
-        q + ", Brasil"
-    ]
+    consultas = []
+
+    def adicionar_consulta(texto):
+        texto = " ".join((texto or "").split()).strip()
+        if texto and texto.lower() not in {
+            x.lower() for x in consultas
+        }:
+            consultas.append(texto)
+
+    adicionar_consulta(q)
+    adicionar_consulta(q + ", Brasil")
 
     for consulta in consultas:
         try:
@@ -3239,39 +3252,49 @@ def api_buscar_enderecos():
             continue
 
     # =========================================================
-    # 2) PHOTON - SEGUNDA TENTATIVA
+    # 2) PHOTON / KOMOOT
+    # Sempre complementa a busca do Nominatim.
     # =========================================================
-    if len(resultados) < 3:
-        try:
-            params = urlencode({
-                "q": q,
-                "limit": 10,
-                "lang": "pt"
-            })
+    if len(resultados) < 10:
+        consultas_photon = [q]
 
-            req = Request(
-                "https://photon.komoot.io/api/?" + params,
-                headers={
-                    "User-Agent":
-                        "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
-                }
-            )
+        # Para buscas sem "Brasil", fazemos uma segunda tentativa
+        # deixando explícito que o endereço está no Brasil.
+        if "brasil" not in q.lower():
+            consultas_photon.append(q + ", Brasil")
 
-            with urlopen(req, timeout=10) as resp:
-                dados = json.loads(
-                    resp.read().decode("utf-8")
+        for consulta in consultas_photon:
+            try:
+                params = urlencode({
+                    "q": consulta,
+                    "limit": 10,
+                    "lang": "pt"
+                })
+
+                req = Request(
+                    "https://photon.komoot.io/api/?" + params,
+                    headers={
+                        "User-Agent":
+                            "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                    }
                 )
 
-            for feature in dados.get("features", []):
-                geom = feature.get("geometry", {})
-                coords = geom.get("coordinates", [])
+                with urlopen(req, timeout=10) as resp:
+                    dados = json.loads(
+                        resp.read().decode("utf-8")
+                    )
 
-                if len(coords) >= 2:
+                for feature in dados.get("features", []):
+                    geom = feature.get("geometry", {})
+                    coords = geom.get("coordinates", [])
+
+                    if len(coords) < 2:
+                        continue
+
                     lon = coords[0]
                     lat = coords[1]
 
                     props = feature.get("properties", {})
-
                     partes = []
 
                     for chave in (
@@ -3280,6 +3303,7 @@ def api_buscar_enderecos():
                         "housenumber",
                         "district",
                         "city",
+                        "county",
                         "state",
                         "country"
                     ):
@@ -3292,8 +3316,14 @@ def api_buscar_enderecos():
 
                     adicionar(lat, lon, nome)
 
-        except Exception:
-            pass
+                    if len(resultados) >= 10:
+                        break
+
+                if len(resultados) >= 10:
+                    break
+
+            except Exception:
+                continue
 
     return {
         "ok": True,
