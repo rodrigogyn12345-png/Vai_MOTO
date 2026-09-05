@@ -3491,6 +3491,18 @@ def motorista():
 
     corpo_motorista = f"""
 <style>
+/* BOTÃO ACEITAR CORRIDA GRANDE */
+form[action^="/motorista/aceitar/"] .motor-btn {
+    width: 100% !important;
+    min-height: 105px !important;
+    padding: 28px 18px !important;
+    font-size: 30px !important;
+    font-weight: 900 !important;
+    border-radius: 18px !important;
+    margin: 18px 0 !important;
+    display: block !important;
+}
+
 .motor-btn.vermelho {{
     background:#b00000 !important;
     color:#fff !important;
