@@ -3073,7 +3073,15 @@ async function usarGPS(){
 async function buscarDestino(){
   const q=document.getElementById("destino").value.trim();
   if(!q){msg("Digite o destino.","erro");return;}
-  const r=await fetch("/api/buscar-enderecos",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q})});
+
+  const lat=document.getElementById("origem_lat").value;
+  const lon=document.getElementById("origem_lon").value;
+
+  const r=await fetch("/api/buscar-enderecos",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({q,lat,lon})
+  });
   const d=await r.json();
   const box=document.getElementById("resultado-endereco");
   box.innerHTML="";
@@ -4279,6 +4287,18 @@ def api_buscar_enderecos():
     if not q:
         return {"ok": False, "resultados": []}
 
+    # GPS atual do passageiro: usado apenas para priorizar
+    # resultados próximos, sem limitar a busca à cidade atual.
+    gps_lat = data.get("lat")
+    gps_lon = data.get("lon")
+
+    try:
+        gps_lat = float(gps_lat) if gps_lat not in (None, "") else None
+        gps_lon = float(gps_lon) if gps_lon not in (None, "") else None
+    except Exception:
+        gps_lat = None
+        gps_lon = None
+
     resultados = []
 
     def adicionar(lat, lon, nome):
@@ -4345,22 +4365,14 @@ def api_buscar_enderecos():
 
     adicionar_consulta(q_corrigido)
 
-    # Tenta também com Aragoiânia/Goiás quando a busca
-    # não informou claramente uma cidade.
-    cidades_conhecidas = (
-        "aragoiânia",
-        "aragoiania",
-        "goiânia",
-        "goiania",
-        "guapó",
-        "guapo"
-    )
+    # A busca é nacional.
+    # Não forçamos nenhuma cidade como padrão.
+    cidades_conhecidas = ()
 
-    if not any(cidade in q_lower for cidade in cidades_conhecidas):
-        adicionar_consulta(q + ", Aragoiânia, Goiás, Brasil")
-        adicionar_consulta(q_corrigido + ", Aragoiânia, Goiás, Brasil")
-
+    # Tentativas gerais para endereços do Brasil.
+    adicionar_consulta(q_corrigido)
     adicionar_consulta(q + ", Brasil")
+    adicionar_consulta(q_corrigido + ", Brasil")
 
     for consulta in consultas:
         try:
@@ -4373,6 +4385,17 @@ def api_buscar_enderecos():
                 "dedupe": 1,
                 "accept-language": "pt-BR"
             })
+
+            # Quando temos GPS, usamos uma área ao redor do passageiro
+            # apenas como prioridade de busca. A busca continua nacional.
+            if gps_lat is not None and gps_lon is not None:
+                margem = 0.35
+                params["viewbox"] = ",".join([
+                    str(gps_lon - margem),
+                    str(gps_lat + margem),
+                    str(gps_lon + margem),
+                    str(gps_lat - margem)
+                ])
 
             req = Request(
                 "https://nominatim.openstreetmap.org/search?" + params,
@@ -4394,7 +4417,8 @@ def api_buscar_enderecos():
                     x.get("display_name", "")
                 )
 
-            if len(resultados) >= 10:
+            # Deixa espaço para o Photon complementar a busca.
+            if len(resultados) >= 5:
                 break
 
         except Exception:
@@ -4419,18 +4443,24 @@ def api_buscar_enderecos():
             consultas_photon.append(q + ", Brasil")
             consultas_photon.append(q_corrigido + ", Brasil")
 
-        if not any(cidade in q_lower for cidade in cidades_conhecidas):
-            consultas_photon.append(
-                q_corrigido + ", Aragoiânia, Goiás, Brasil"
-            )
+        # Não forçamos Aragoiânia.
+        # O GPS já serve para priorizar resultados próximos.
 
         for consulta in consultas_photon:
             try:
-                params = urlencode({
+                params_dict = {
                     "q": consulta,
                     "limit": 10,
                     "lang": "pt"
-                })
+                }
+
+                # O Photon também recebe o GPS para priorizar
+                # resultados próximos, sem bloquear outras cidades.
+                if gps_lat is not None and gps_lon is not None:
+                    params_dict["lat"] = gps_lat
+                    params_dict["lon"] = gps_lon
+
+                params = urlencode(params_dict)
 
                 req = Request(
                     "https://photon.komoot.io/api/?" + params,
