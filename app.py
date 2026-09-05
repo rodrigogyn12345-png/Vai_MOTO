@@ -3450,6 +3450,41 @@ def api_buscar_enderecos():
             consultas.append(texto)
 
     adicionar_consulta(q)
+
+    # =========================================================
+    # MELHORIAS PARA ENDEREÇOS DIGITADOS COM ERROS
+    # =========================================================
+    q_lower = q.lower()
+
+    # Corrige erros comuns de digitação
+    correcoes = {
+        "girasol": "girassol",
+        "aragoiania": "aragoiânia",
+        "aragoiania, goias": "aragoiânia, Goiás",
+        "aragoiania, go": "aragoiânia, Goiás"
+    }
+
+    q_corrigido = q
+    for errado, correto in correcoes.items():
+        q_corrigido = q_corrigido.replace(errado, correto)
+
+    adicionar_consulta(q_corrigido)
+
+    # Tenta também com Aragoiânia/Goiás quando a busca
+    # não informou claramente uma cidade.
+    cidades_conhecidas = (
+        "aragoiânia",
+        "aragoiania",
+        "goiânia",
+        "goiania",
+        "guapó",
+        "guapo"
+    )
+
+    if not any(cidade in q_lower for cidade in cidades_conhecidas):
+        adicionar_consulta(q + ", Aragoiânia, Goiás, Brasil")
+        adicionar_consulta(q_corrigido + ", Aragoiânia, Goiás, Brasil")
+
     adicionar_consulta(q + ", Brasil")
 
     for consulta in consultas:
@@ -3497,10 +3532,22 @@ def api_buscar_enderecos():
     if len(resultados) < 10:
         consultas_photon = [q]
 
-        # Para buscas sem "Brasil", fazemos uma segunda tentativa
+        # Usa a versão corrigida também no Photon.
+        if q_corrigido.lower() not in {
+            x.lower() for x in consultas_photon
+        }:
+            consultas_photon.append(q_corrigido)
+
+        # Para buscas sem "Brasil", fazemos tentativas extras
         # deixando explícito que o endereço está no Brasil.
         if "brasil" not in q.lower():
             consultas_photon.append(q + ", Brasil")
+            consultas_photon.append(q_corrigido + ", Brasil")
+
+        if not any(cidade in q_lower for cidade in cidades_conhecidas):
+            consultas_photon.append(
+                q_corrigido + ", Aragoiânia, Goiás, Brasil"
+            )
 
         for consulta in consultas_photon:
             try:
