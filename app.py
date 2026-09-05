@@ -7,7 +7,7 @@ from flask import Flask, request, redirect, url_for, session, render_template_st
 import sqlite3
 import json
 import math
-from urllib.parse import urlencode
+from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -3347,9 +3347,15 @@ def motorista():
             taxa_app = valor * 0.09
             distancia = float(c["distancia_km"] or 0)
 
-            origem = html.escape(str(c["origem"] or ""))
-            destino = html.escape(str(c["destino"] or ""))
+            origem_raw = str(c["origem"] or "")
+            destino_raw = str(c["destino"] or "")
+
+            origem = html.escape(origem_raw)
+            destino = html.escape(destino_raw)
             pagamento = html.escape(str(c["pagamento"] or "DINHEIRO"))
+
+            waze_origem = quote(origem_raw, safe="")
+            waze_destino = quote(destino_raw, safe="")
 
             disponiveis_html += f"""
             <div class="corrida disponivel">
@@ -3421,9 +3427,14 @@ def motorista():
                 <a class="motor-btn azul"
                    href="https://www.google.com/maps/dir/?api=1&destination={origem.replace(" ", "+")}&travelmode=driving"
                    target="_blank">
-                    🧭 IR ATÉ O PASSAGEIRO
+                    🗺️ GOOGLE MAPS — IR ATÉ O PASSAGEIRO
                 </a>
-                <form method="POST" action="/motorista/cheguei/{c["id"]}">
+                <a class="motor-btn azul"
+       href="https://waze.com/ul?q={waze_origem}&navigate=yes"
+       target="_blank">
+        🚗 WAZE — IR ATÉ O PASSAGEIRO
+    </a>
+    <form method="POST" action="/motorista/cheguei/{c["id"]}">
                     <button class="motor-btn amarelo" type="submit">
                         📍 CHEGUEI AO PASSAGEIRO
                     </button>
@@ -3444,9 +3455,14 @@ def motorista():
                 <a class="motor-btn azul"
                    href="https://www.google.com/maps/dir/?api=1&destination={destino.replace(" ", "+")}&travelmode=driving"
                    target="_blank">
-                    🏁 IR ATÉ O DESTINO
+                    🗺️ GOOGLE MAPS — IR ATÉ O DESTINO
                 </a>
-                <form method="POST" action="/motorista/concluir/{c["id"]}">
+                <a class="motor-btn azul"
+       href="https://waze.com/ul?q={waze_destino}&navigate=yes"
+       target="_blank">
+        🚗 WAZE — IR ATÉ O DESTINO
+    </a>
+    <form method="POST" action="/motorista/concluir/{c["id"]}">
                     <button class="motor-btn verde" type="submit">
                         ✅ FINALIZAR CORRIDA
                     </button>
