@@ -3776,7 +3776,7 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
-  function beep(freq, inicio, duracao){
+  function beep(freq, inicio, duracao, tipo="triangle", volume=0.95){
     try{
       if(!ctx){
         ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -3790,12 +3790,12 @@ def alerta_sonoro_motorista(response):
       const o = ctx.createOscillator();
       const g = ctx.createGain();
 
-      o.type = "sine";
+      o.type = tipo;
       o.frequency.setValueAtTime(freq, agora + inicio);
 
       g.gain.setValueAtTime(0.0001, agora + inicio);
       g.gain.exponentialRampToValueAtTime(
-        0.75,
+        volume,
         agora + inicio + 0.025
       );
       g.gain.exponentialRampToValueAtTime(
@@ -3807,7 +3807,7 @@ def alerta_sonoro_motorista(response):
       g.connect(ctx.destination);
 
       o.start(agora + inicio);
-      o.stop(agora + inicio + duracao + 0.05);
+      o.stop(agora + inicio + duracao + 0.08);
     }catch(e){}
   }
 
@@ -3818,11 +3818,11 @@ def alerta_sonoro_motorista(response):
       window.speechSynthesis.cancel();
 
       const fala = new SpeechSynthesisUtterance(
-        "VAI DE MOTO! Nova corrida disponível."
+        "VAI DE MOTO! Nova corrida disponível!"
       );
 
       fala.lang = "pt-BR";
-      fala.rate = 0.9;
+      fala.rate = 0.85;
       fala.pitch = 1.0;
       fala.volume = 1.0;
 
@@ -3836,20 +3836,28 @@ def alerta_sonoro_motorista(response):
     tocando = true;
     liberarAudio();
 
-    // Anuncia a nova corrida
-    falarNovaCorrida();
-
     function chamada(){
       if(!tocando) return;
 
-      beep(880, 0.00, 0.32);
-      beep(1175, 0.38, 0.32);
-      beep(880, 0.76, 0.32);
-      beep(1175, 1.14, 0.32);
+      // 🔔 TOQUE FORTE E CHAMATIVO
+      beep(740, 0.00, 0.28, "triangle", 0.95);
+      beep(988, 0.32, 0.28, "triangle", 0.95);
+
+      beep(740, 0.72, 0.28, "square", 0.85);
+      beep(1175, 1.04, 0.38, "triangle", 0.95);
+
+      // Voz depois do toque
+      setTimeout(function(){
+        if(tocando){
+          falarNovaCorrida();
+        }
+      }, 1550);
     }
 
     chamada();
-    intervalo = setInterval(chamada, 2500);
+
+    // Repete enquanto existir corrida disponível
+    intervalo = setInterval(chamada, 4200);
   }
 
   function pararChamada(){
