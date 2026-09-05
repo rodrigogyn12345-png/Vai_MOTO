@@ -3482,7 +3482,14 @@ def api_calcular_corrida():
     )
     if distancia <= 0:
         return {"ok": False, "erro": "Coordenadas inválidas."}
-    valor = round(distancia * PRECO_KM, 2)
+    # Tarifa VAI_DE_MOTO:
+    # Até 4 km = R$ 7,00 fixos
+    # Acima de 4 km = R$ 2,00 por km da distância total
+    if distancia <= 4:
+        valor = 7.00
+    else:
+        valor = round(distancia * PRECO_KM, 2)
+
     taxa = round(valor * TAXA_APP, 2)
     motorista = round(valor - taxa, 2)
     return {
