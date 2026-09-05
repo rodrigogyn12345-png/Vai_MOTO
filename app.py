@@ -2371,8 +2371,73 @@ def passageiro():
         <input id="origem" class="pub-input" placeholder="Sua localização">
         <input id="origem_lat" type="hidden">
         <input id="origem_lon" type="hidden">
-        <button class="pub-btn pub-blue" type="button" onclick="navigator.geolocation.getCurrentPosition(function(p){document.getElementById('origem_lat').value=p.coords.latitude;document.getElementById('origem_lon').value=p.coords.longitude;document.getElementById('origem').value=p.coords.latitude.toFixed(6)+', '+p.coords.longitude.toFixed(6);alert('Localização encontrada!');},function(e){alert('GPS não conseguiu localizar. Ative a localização precisa e tente novamente.');},{enableHighAccuracy:true,timeout:20000,maximumAge:0})">🎯 USAR MINHA LOCALIZAÇÃO</button>
+        <button class="pub-btn pub-blue" type="button" onclick="usarMinhaLocalizacao()">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
+
+<script>
+async function usarMinhaLocalizacao(){
+    const origem = document.getElementById("origem");
+    const latInput = document.getElementById("origem_lat");
+    const lonInput = document.getElementById("origem_lon");
+
+    origem.value = "📍 LOCALIZANDO...";
+    
+    if(!navigator.geolocation){
+        origem.value = "";
+        alert("Este aparelho não suporta localização por GPS.");
+        return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+        async function(pos){
+            const lat = pos.coords.latitude;
+            const lon = pos.coords.longitude;
+
+            latInput.value = lat;
+            lonInput.value = lon;
+
+            origem.value = "🔄 BUSCANDO ENDEREÇO...";
+
+            try{
+                const resposta = await fetch("/api/endereco-gps", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                        lat: lat,
+                        lon: lon
+                    }),
+                    cache: "no-store"
+                });
+
+                const dados = await resposta.json();
+
+                if(dados.ok && dados.endereco){
+                    origem.value = dados.endereco;
+                    alert("Localização encontrada!");
+                }else{
+                    origem.value = lat.toFixed(6) + ", " + lon.toFixed(6);
+                    alert("GPS encontrado, mas não foi possível obter o endereço. As coordenadas foram mantidas.");
+                }
+
+            }catch(erro){
+                origem.value = lat.toFixed(6) + ", " + lon.toFixed(6);
+                alert("GPS encontrado, mas houve erro ao buscar o endereço.");
+            }
+        },
+        function(erro){
+            origem.value = "";
+            alert("GPS não conseguiu localizar. Ative a localização precisa e tente novamente.");
+        },
+        {
+            enableHighAccuracy: true,
+            timeout: 20000,
+            maximumAge: 0
+        }
+    );
+}
+</script>
 
         <h3>🏁 Destino</h3>
         <input id="destino" class="pub-input" placeholder="Rua, número, bairro ou endereço completo">
@@ -3878,6 +3943,91 @@ def alerta_sonoro_motorista(response):
     liberarAudio();
   }, {passive:true});
 
+  let contadorCorridaIntervalo = null;
+  let contadorCorrida = 0;
+
+  function pararContagemCorrida(){
+    if(contadorCorridaIntervalo){
+      clearInterval(contadorCorridaIntervalo);
+      contadorCorridaIntervalo = null;
+    }
+
+    const painel = document.getElementById("contador-nova-corrida");
+    if(painel){
+      painel.remove();
+    }
+  }
+
+  function iniciarContagemCorrida(){
+    pararContagemCorrida();
+
+    contadorCorrida = 10;
+
+    const painel = document.createElement("div");
+    painel.id = "contador-nova-corrida";
+    painel.style.cssText = `
+      position:fixed;
+      top:12px;
+      left:50%;
+      transform:translateX(-50%);
+      z-index:99999;
+      width:calc(100% - 24px);
+      max-width:500px;
+      box-sizing:border-box;
+      background:#b00000;
+      color:#fff;
+      border-radius:16px;
+      padding:16px 12px;
+      text-align:center;
+      font-weight:bold;
+      box-shadow:0 6px 25px rgba(0,0,0,.45);
+      border:3px solid #fff;
+    `;
+
+    painel.innerHTML = `
+      <div style="font-size:22px;">🚨 NOVA CORRIDA!</div>
+      <div style="font-size:17px;margin-top:4px;">Aceite a corrida antes que o tempo termine</div>
+      <div id="numero-contador-corrida"
+           style="font-size:52px;line-height:1.05;margin-top:6px;">
+        10
+      </div>
+      <div style="font-size:15px;">segundos</div>
+    `;
+
+    document.body.appendChild(painel);
+
+    contadorCorridaIntervalo = setInterval(function(){
+      contadorCorrida--;
+
+      const numero = document.getElementById("numero-contador-corrida");
+
+      if(numero){
+        numero.textContent = contadorCorrida;
+      }
+
+      if(contadorCorrida <= 0){
+        clearInterval(contadorCorridaIntervalo);
+        contadorCorridaIntervalo = null;
+
+        if(numero){
+          numero.textContent = "0";
+        }
+
+        const texto = painel.querySelector("div:nth-child(2)");
+        if(texto){
+          texto.textContent = "⏰ Tempo para aceitar encerrado";
+        }
+
+        setTimeout(function(){
+          const p = document.getElementById("contador-nova-corrida");
+          if(p){
+            p.remove();
+          }
+        }, 2500);
+      }
+    }, 1000);
+  }
+
   async function verificarCorridas(){
     try{
       const r = await fetch("/api/corridas-disponiveis", {
@@ -3897,10 +4047,12 @@ def alerta_sonoro_motorista(response):
 
       if(quantidade > ultimaQuantidade){
         tocarChamada();
+        iniciarContagemCorrida();
       }
 
       if(quantidade === 0){
         pararChamada();
+        pararContagemCorrida();
       }
 
       ultimaQuantidade = quantidade;
@@ -3925,6 +4077,7 @@ def alerta_sonoro_motorista(response):
       form.action.includes("/motorista/aceitar/")
     ){
       pararChamada();
+      pararContagemCorrida();
 
       localStorage.setItem(
         "vai_moto_qtd_corridas",
