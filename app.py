@@ -2893,6 +2893,100 @@ def motorista():
     font-weight:800;
 }}
 
+/* ===== PAINEL DO MOTORISTA - LETRAS GRANDES ===== */
+
+.motor-menu a {{
+    font-size:20px;
+    padding:16px 12px;
+    min-height:52px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}}
+
+h2 {{
+    font-size:32px;
+    line-height:1.2;
+}}
+
+.motor-menu ~ h2 {{
+    font-size:32px;
+}}
+
+.pub-info {{
+    font-size:21px;
+    padding:18px;
+}}
+
+.pub-card h3 {{
+    font-size:25px;
+    line-height:1.25;
+}}
+
+.pub-card p {{
+    font-size:18px;
+    line-height:1.45;
+}}
+
+.pub-card {{
+    padding:20px;
+}}
+
+.pub-card button,
+.pub-card a {{
+    font-size:19px;
+}}
+
+.ganho-num {{
+    font-size:30px;
+}}
+
+.ganhos-box {{
+    font-size:19px;
+}}
+
+.ganhos-box strong {{
+    font-size:21px;
+}}
+
+button {{
+    font-size:19px !important;
+    min-height:52px;
+}}
+
+.pub-btn {{
+    font-size:19px !important;
+    min-height:52px;
+}}
+
+@media(max-width:600px) {{
+    .motor-menu a {{
+        font-size:20px;
+    }}
+
+    h2,
+    .motor-menu ~ h2 {{
+        font-size:30px;
+    }}
+
+    .pub-info {{
+        font-size:20px;
+    }}
+
+    .pub-card h3 {{
+        font-size:24px;
+    }}
+
+    .pub-card p {{
+        font-size:18px;
+    }}
+
+    .ganho-num {{
+        font-size:30px;
+    }}
+}}
+
+
 @media(max-width:600px) {{
     .valores {{
         grid-template-columns:1fr;
