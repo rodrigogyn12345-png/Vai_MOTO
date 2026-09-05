@@ -762,6 +762,20 @@ def dashboard():
             ABRIR PASSAGEIROS
         </a>
     </div>
+
+
+    <div class="card">
+        <h2>💰 Financeiro</h2>
+        <p>
+            Faturamento, taxa de 9%, ganhos dos motoristas
+            e controle dos repasses.
+        </p>
+
+        <a class="btn btn-azul"
+           href="{url_for('financeiro')}">
+            💰 ABRIR FINANCEIRO
+        </a>
+    </div>
     """
 
     return pagina(html)
@@ -1249,6 +1263,435 @@ def excluir_motoqueiro(id):
 # ============================================================
 # ADMIN - CORRIDAS
 # ============================================================
+
+
+@app.route("/financeiro", methods=["GET", "POST"])
+@login_obrigatorio
+def financeiro():
+
+    conn = conectar()
+
+    # Migração automática para controle de repasse
+    try:
+        conn.execute("""
+            ALTER TABLE corridas_vai
+            ADD COLUMN repasse_status TEXT DEFAULT 'PENDENTE'
+        """)
+    except Exception:
+        pass
+
+    try:
+        conn.execute("""
+            ALTER TABLE corridas_vai
+            ADD COLUMN repasse_em TIMESTAMP
+        """)
+    except Exception:
+        pass
+
+    conn.commit()
+
+    if request.method == "POST":
+
+        motorista_id = request.form.get("motorista_id", type=int)
+        inicio = request.form.get("inicio", "").strip()
+        fim = request.form.get("fim", "").strip()
+
+        if motorista_id:
+
+            sql = """
+                UPDATE corridas_vai
+                SET
+                    repasse_status = 'REPASSADO',
+                    repasse_em = CURRENT_TIMESTAMP
+                WHERE motorista_id = ?
+                  AND status = 'CONCLUIDA'
+                  AND COALESCE(repasse_status, 'PENDENTE') = 'PENDENTE'
+            """
+
+            params = [motorista_id]
+
+            if inicio:
+                sql += " AND DATE(criado_em) >= DATE(?)"
+                params.append(inicio)
+
+            if fim:
+                sql += " AND DATE(criado_em) <= DATE(?)"
+                params.append(fim)
+
+            conn.execute(sql, params)
+            conn.commit()
+
+        conn.close()
+
+        return redirect(
+            url_for(
+                "financeiro",
+                inicio=inicio,
+                fim=fim
+            )
+        )
+
+    inicio = request.args.get("inicio", "").strip()
+    fim = request.args.get("fim", "").strip()
+
+    filtro_sql = """
+        WHERE c.status = 'CONCLUIDA'
+    """
+
+    params = []
+
+    if inicio:
+        filtro_sql += " AND DATE(c.criado_em) >= DATE(?)"
+        params.append(inicio)
+
+    if fim:
+        filtro_sql += " AND DATE(c.criado_em) <= DATE(?)"
+        params.append(fim)
+
+    motoristas = conn.execute("""
+        SELECT
+            m.id,
+            m.nome,
+            m.telefone
+        FROM motoqueiros m
+        ORDER BY m.nome
+    """).fetchall()
+
+    resumo = conn.execute(f"""
+        SELECT
+            c.motorista_id,
+
+            COUNT(c.id) AS quantidade,
+
+            COALESCE(SUM(c.valor), 0) AS bruto,
+
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN c.taxa_app IS NOT NULL
+                             AND c.taxa_app > 0
+                        THEN c.taxa_app
+                        ELSE COALESCE(c.valor, 0) * 0.09
+                    END
+                ),
+                0
+            ) AS taxa,
+
+            COALESCE(
+                SUM(
+                    CASE
+                        WHEN c.valor_motorista IS NOT NULL
+                             AND c.valor_motorista > 0
+                        THEN c.valor_motorista
+                        ELSE COALESCE(c.valor, 0) * 0.91
+                    END
+                ),
+                0
+            ) AS motorista,
+
+            SUM(
+                CASE
+                    WHEN COALESCE(c.repasse_status, 'PENDENTE') = 'REPASSADO'
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS repassadas,
+
+            SUM(
+                CASE
+                    WHEN COALESCE(c.repasse_status, 'PENDENTE') = 'PENDENTE'
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS pendentes
+
+        FROM corridas_vai c
+        {filtro_sql}
+        GROUP BY c.motorista_id
+    """, params).fetchall()
+
+    conn.close()
+
+    resumo_por_motorista = {
+        r["motorista_id"]: r
+        for r in resumo
+    }
+
+    total_bruto = sum(float(r["bruto"] or 0) for r in resumo)
+    total_taxa = sum(float(r["taxa"] or 0) for r in resumo)
+    total_motoristas = sum(float(r["motorista"] or 0) for r in resumo)
+    total_corridas = sum(int(r["quantidade"] or 0) for r in resumo)
+
+    cards = ""
+
+    for m in motoristas:
+
+        r = resumo_por_motorista.get(m["id"])
+
+        if r:
+            quantidade = int(r["quantidade"] or 0)
+            bruto = float(r["bruto"] or 0)
+            taxa = float(r["taxa"] or 0)
+            valor_motorista = float(r["motorista"] or 0)
+            repassadas = int(r["repassadas"] or 0)
+            pendentes = int(r["pendentes"] or 0)
+        else:
+            quantidade = 0
+            bruto = 0
+            taxa = 0
+            valor_motorista = 0
+            repassadas = 0
+            pendentes = 0
+
+        cards += f"""
+        <div class="card" style="
+            margin-bottom:18px;
+            border-left:6px solid #111;
+        ">
+
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                gap:10px;
+                flex-wrap:wrap;
+            ">
+
+                <div>
+                    <h2 style="margin:0;">
+                        🏍️ {m["nome"]}
+                    </h2>
+
+                    <div style="color:#666;margin-top:5px;">
+                        {m["telefone"] or ""}
+                    </div>
+                </div>
+
+                <div style="
+                    font-size:24px;
+                    font-weight:bold;
+                ">
+                    R$ {valor_motorista:.2f}
+                </div>
+
+            </div>
+
+            <hr>
+
+            <div class="grid">
+
+                <div class="stat">
+                    <div class="titulo">🏍️ Corridas</div>
+                    <div class="numero">{quantidade}</div>
+                </div>
+
+                <div class="stat">
+                    <div class="titulo">💰 Bruto</div>
+                    <div class="numero">
+                        R$ {bruto:.2f}
+                    </div>
+                </div>
+
+                <div class="stat">
+                    <div class="titulo">🏢 Taxa 9%</div>
+                    <div class="numero">
+                        R$ {taxa:.2f}
+                    </div>
+                </div>
+
+                <div class="stat">
+                    <div class="titulo">🏍️ Motorista 91%</div>
+                    <div class="numero">
+                        R$ {valor_motorista:.2f}
+                    </div>
+                </div>
+
+            </div>
+
+            <div style="
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+                margin-top:15px;
+            ">
+
+                <span style="
+                    background:#fff3cd;
+                    padding:9px 13px;
+                    border-radius:10px;
+                    font-weight:bold;
+                ">
+                    🟡 {pendentes} pendente(s)
+                </span>
+
+                <span style="
+                    background:#d1e7dd;
+                    padding:9px 13px;
+                    border-radius:10px;
+                    font-weight:bold;
+                ">
+                    🟢 {repassadas} repassada(s)
+                </span>
+
+            </div>
+
+            <form method="POST"
+                  action="{url_for('financeiro')}"
+                  style="margin-top:18px;">
+
+                <input type="hidden"
+                       name="motorista_id"
+                       value="{m["id"]}">
+
+                <input type="hidden"
+                       name="inicio"
+                       value="{inicio}">
+
+                <input type="hidden"
+                       name="fim"
+                       value="{fim}">
+
+                <button type="submit"
+                        class="btn btn-azul"
+                        onclick="return confirm('Confirmar repasse deste motorista no período selecionado?');">
+                    💸 MARCAR COMO REPASSADO
+                </button>
+
+            </form>
+
+        </div>
+        """
+
+    html = f"""
+
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:15px;
+        margin-bottom:25px;
+    ">
+
+        <img src="/icone/logo-vai-de-moto.png"
+             style="
+                width:75px;
+                height:75px;
+                object-fit:contain;
+                border-radius:18px;
+             "
+             alt="VAI_DE_MOTO">
+
+        <div>
+            <h1 style="margin:0;">
+                💰 FINANCEIRO
+            </h1>
+
+            <div style="
+                font-size:17px;
+                color:#666;
+                margin-top:4px;
+            ">
+                Controle de ganhos e repasses
+            </div>
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>📅 Filtrar período</h2>
+
+        <form method="GET"
+              action="{url_for('financeiro')}"
+              style="
+                display:flex;
+                gap:10px;
+                flex-wrap:wrap;
+                align-items:end;
+              ">
+
+            <div>
+                <label>Data inicial</label><br>
+                <input type="date"
+                       name="inicio"
+                       value="{inicio}">
+            </div>
+
+            <div>
+                <label>Data final</label><br>
+                <input type="date"
+                       name="fim"
+                       value="{fim}">
+            </div>
+
+            <button class="btn btn-azul"
+                    type="submit">
+                🔎 FILTRAR
+            </button>
+
+            <a class="btn"
+               href="{url_for('financeiro')}">
+                LIMPAR
+            </a>
+
+        </form>
+
+    </div>
+
+    <div class="grid">
+
+        <div class="stat">
+            <div class="titulo">🚕 Corridas concluídas</div>
+            <div class="numero">{total_corridas}</div>
+        </div>
+
+        <div class="stat">
+            <div class="titulo">💰 Faturamento bruto</div>
+            <div class="numero">
+                R$ {total_bruto:.2f}
+            </div>
+        </div>
+
+        <div class="stat">
+            <div class="titulo">🏢 VAI_DE_MOTO 9%</div>
+            <div class="numero">
+                R$ {total_taxa:.2f}
+            </div>
+        </div>
+
+        <div class="stat">
+            <div class="titulo">🏍️ Motoristas 91%</div>
+            <div class="numero">
+                R$ {total_motoristas:.2f}
+            </div>
+        </div>
+
+    </div>
+
+    <div class="card">
+
+        <h2>🏍️ Repasses por motorista</h2>
+
+        <p>
+            O motorista recebe <strong>91%</strong>
+            e o aplicativo fica com <strong>9%</strong>.
+        </p>
+
+    </div>
+
+    {cards}
+
+    <div style="margin-top:20px;">
+        <a class="btn btn-azul"
+           href="{url_for('dashboard')}">
+            ⬅️ VOLTAR AO PAINEL
+        </a>
+    </div>
+
+    """
+
+    return pagina(html)
+
+
 
 @app.route("/corridas")
 @login_obrigatorio
