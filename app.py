@@ -3186,6 +3186,144 @@ async function carregarCorridas(){
   }
 }
 carregarCorridas();
+
+/* ===== NOTIFICAÇÃO: MOTORISTA CHEGOU ===== */
+(function(){
+
+  let ultimaEtapaChegou = localStorage.getItem("vai_moto_etapa_chegou") || "";
+
+  function somMotoristaChegou(){
+    try{
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+
+      if(ctx.state === "suspended"){
+        ctx.resume();
+      }
+
+      function beep(freq, inicio, duracao){
+        const o = ctx.createOscillator();
+        const g = ctx.createGain();
+
+        o.type = "sine";
+        o.frequency.setValueAtTime(freq, ctx.currentTime + inicio);
+
+        g.gain.setValueAtTime(0.0001, ctx.currentTime + inicio);
+        g.gain.exponentialRampToValueAtTime(
+          0.8,
+          ctx.currentTime + inicio + 0.03
+        );
+        g.gain.exponentialRampToValueAtTime(
+          0.0001,
+          ctx.currentTime + inicio + duracao
+        );
+
+        o.connect(g);
+        g.connect(ctx.destination);
+
+        o.start(ctx.currentTime + inicio);
+        o.stop(ctx.currentTime + inicio + duracao + 0.05);
+      }
+
+      beep(880,  0.00, 0.18);
+      beep(1175, 0.22, 0.18);
+      beep(1568, 0.44, 0.30);
+
+    }catch(e){}
+  }
+
+  function mostrarMotoristaChegou(){
+
+    const antigo = document.getElementById("aviso-motorista-chegou");
+    if(antigo) antigo.remove();
+
+    const aviso = document.createElement("div");
+
+    aviso.id = "aviso-motorista-chegou";
+
+    aviso.style.cssText =
+      "position:fixed;" +
+      "top:15px;" +
+      "left:50%;" +
+      "transform:translateX(-50%);" +
+      "z-index:999999;" +
+      "width:calc(100% - 24px);" +
+      "max-width:520px;" +
+      "background:#087f23;" +
+      "color:white;" +
+      "border:4px solid white;" +
+      "border-radius:20px;" +
+      "padding:20px;" +
+      "text-align:center;" +
+      "font-weight:900;" +
+      "box-shadow:0 8px 30px rgba(0,0,0,.65);";
+
+    aviso.innerHTML =
+      '<div style="font-size:30px;">🚨 MOTORISTA CHEGOU!</div>' +
+      '<div style="font-size:20px;margin-top:8px;">📍 Seu motorista está aguardando você.</div>';
+
+    document.body.appendChild(aviso);
+
+    somMotoristaChegou();
+
+    setTimeout(function(){
+      if(aviso.parentNode){
+        aviso.remove();
+      }
+    }, 8000);
+  }
+
+  async function verificarMotoristaChegou(){
+
+    try{
+
+      const r = await fetch(
+        "/api/minhas-corridas",
+        {
+          cache:"no-store",
+          credentials:"same-origin"
+        }
+      );
+
+      if(!r.ok) return;
+
+      const d = await r.json();
+
+      if(!d.ok || !Array.isArray(d.corridas)) return;
+
+      const corrida = d.corridas.find(function(c){
+        return c.etapa === "CHEGOU" &&
+               (c.status === "ACEITA" || c.status === "EM_ANDAMENTO");
+      });
+
+      if(!corrida){
+        return;
+      }
+
+      const chave = String(corrida.id);
+
+      if(ultimaEtapaChegou !== chave){
+
+        ultimaEtapaChegou = chave;
+
+        localStorage.setItem(
+          "vai_moto_etapa_chegou",
+          chave
+        );
+
+        mostrarMotoristaChegou();
+      }
+
+    }catch(e){}
+  }
+
+  verificarMotoristaChegou();
+
+  setInterval(
+    verificarMotoristaChegou,
+    2000
+  );
+
+})();
 </script>
     """, manifesto="passageiro")
 
