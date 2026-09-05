@@ -4121,6 +4121,18 @@ def _motorista_logado():
     return session.get("motorista_id")
 
 
+@app.route("/api/motorista/som-dinheiro")
+def api_motorista_som_dinheiro():
+    mid = _motorista_logado()
+
+    if not mid:
+        return {"ok": False}, 401
+
+    tocar = bool(session.pop("vai_moto_som_dinheiro", False))
+
+    return {"ok": True, "tocar": tocar}
+
+
 @app.route("/api/buscar-enderecos", methods=["POST"])
 def api_buscar_enderecos():
     data = _json()
@@ -4615,6 +4627,9 @@ def api_concluir_corrida(id):
     """, (id, mid))
     conn.commit()
     conn.close()
+    if cur.rowcount > 0:
+        session["vai_moto_som_dinheiro"] = True
+
     return {"ok": cur.rowcount > 0, "erro": None if cur.rowcount else "Corrida não está em andamento."}
 
 
@@ -4963,8 +4978,57 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
+  function tocarSomDinheiro(){
+    try{
+      liberarAudio();
+
+      // Som de dinheiro / recebimento
+      beep(880,  0.00, 0.12, "sine", 0.9);
+      beep(1175, 0.14, 0.12, "sine", 0.9);
+      beep(1568, 0.28, 0.18, "sine", 1.0);
+      beep(2093, 0.48, 0.25, "sine", 1.0);
+
+      if("speechSynthesis" in window){
+        setTimeout(function(){
+          try{
+            const fala = new SpeechSynthesisUtterance(
+              "Dinheiro recebido!"
+            );
+            fala.lang = "pt-BR";
+            fala.rate = 0.85;
+            fala.volume = 1.0;
+            window.speechSynthesis.speak(fala);
+          }catch(e){}
+        }, 550);
+      }
+    }catch(e){}
+  }
+
+  async function verificarSomDinheiro(){
+    try{
+      const r = await fetch(
+        "/api/motorista/som-dinheiro",
+        {
+          cache:"no-store",
+          credentials:"same-origin"
+        }
+      );
+
+      if(!r.ok) return;
+
+      const d = await r.json();
+
+      if(d.ok && d.tocar){
+        tocarSomDinheiro();
+      }
+    }catch(e){}
+  }
+
   verificarCorridas();
   setInterval(verificarCorridas, 2000);
+
+  verificarSomDinheiro();
+  setInterval(verificarSomDinheiro, 1000);
 
   window.testarSomVaiDeMoto = function(){
     liberarAudio();
