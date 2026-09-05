@@ -4568,6 +4568,122 @@ def alerta_sonoro_motorista(response):
     intervalo = setInterval(chamada, 4200);
   }
 
+  function pararChamada(){
+    tocando = false;
+
+    if(intervalo){
+      clearInterval(intervalo);
+      intervalo = null;
+    }
+
+    try{
+      if(window.speechSynthesis){
+        window.speechSynthesis.cancel();
+      }
+    }catch(e){}
+  }
+
+  function iniciarContagemCorrida(){
+    const antigo = document.getElementById("contador-nova-corrida");
+    if(antigo) antigo.remove();
+
+    let n = 9;
+
+    const painel = document.createElement("div");
+    painel.id = "contador-nova-corrida";
+
+    painel.style.cssText =
+      "position:fixed;top:10px;left:50%;transform:translateX(-50%);" +
+      "z-index:999999;width:calc(100% - 20px);max-width:520px;" +
+      "background:#b00000;color:white;border:4px solid white;" +
+      "border-radius:18px;padding:16px;text-align:center;" +
+      "font-weight:bold;box-shadow:0 8px 30px rgba(0,0,0,.6);";
+
+    painel.innerHTML =
+      '<div style="font-size:26px">🚨 NOVA CORRIDA!</div>' +
+      '<div style="font-size:20px;margin-top:5px">ACEITE A CORRIDA</div>' +
+      '<div id="numero-contador-corrida" style="font-size:64px;line-height:1;margin:8px">9</div>' +
+      '<div style="font-size:18px">SEGUNDOS</div>';
+
+    document.body.appendChild(painel);
+
+    const relogio = setInterval(function(){
+      n--;
+
+      const numero = document.getElementById("numero-contador-corrida");
+
+      if(numero){
+        numero.textContent = n;
+      }
+
+      if(n <= 0){
+        clearInterval(relogio);
+
+        const texto = painel.querySelector("div:nth-child(2)");
+
+        if(texto){
+          texto.textContent = "⏰ TEMPO ENCERRADO";
+        }
+
+        setTimeout(function(){
+          if(painel.parentNode){
+            painel.remove();
+          }
+        }, 2500);
+      }
+    }, 1000);
+  }
+
+  async function verificarCorridas(){
+    try{
+      const r = await fetch(
+        "/api/corridas-disponiveis",
+        {
+          cache:"no-store",
+          credentials:"same-origin"
+        }
+      );
+
+      if(!r.ok) return;
+
+      const d = await r.json();
+
+      if(!d.ok) return;
+
+      const quantidade =
+        Array.isArray(d.corridas)
+          ? d.corridas.length
+          : 0;
+
+      if(quantidade > ultimaQuantidade){
+        tocarChamada();
+        iniciarContagemCorrida();
+      }
+
+      if(quantidade === 0){
+        pararChamada();
+
+        const painel =
+          document.getElementById("contador-nova-corrida");
+
+        if(painel){
+          painel.remove();
+        }
+      }
+
+      ultimaQuantidade = quantidade;
+
+      localStorage.setItem(
+        "vai_moto_qtd_corridas",
+        String(quantidade)
+      );
+
+    }catch(e){}
+  }
+
+  verificarCorridas();
+  setInterval(verificarCorridas, 2000);
+
   window.testarSomVaiDeMoto = function(){
     liberarAudio();
     tocarChamada();
