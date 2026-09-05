@@ -3129,7 +3129,61 @@ async function carregarCorridas(){
   const box=document.getElementById("lista-corridas");
   if(!d.ok){box.innerHTML="Faça login novamente.";return;}
   if(!d.corridas.length){box.innerHTML="Nenhuma corrida ainda.";return;}
-  box.innerHTML=d.corridas.map(c=>`<div class="pub-info"><b>Corrida #${c.id}</b><br>📍 ${c.origem}<br>🏁 ${c.destino}<br>💰 R$ ${Number(c.valor).toFixed(2)}<br>📌 ${c.status}<br>🏍️ ${c.motorista_nome||"Aguardando motorista"}</div>`).join("");
+  box.innerHTML=d.corridas.map(c=>`
+    <div class="pub-info">
+      <b>🚕 Corrida #${c.id}</b><br>
+      📍 ${c.origem}<br>
+      🏁 ${c.destino}<br>
+      💰 R$ ${Number(c.valor).toFixed(2)}<br>
+      📌 ${c.status}<br>
+      🏍️ ${c.motorista_nome||"Aguardando motorista"}
+
+      ${
+        (c.status === "PENDENTE" || c.status === "ACEITA")
+        ? `
+          <br><br>
+          <button
+            type="button"
+            class="pub-btn"
+            style="background:#b00000;color:#fff;font-weight:900;"
+            onclick="cancelarCorrida(${c.id})">
+            🔴 CANCELAR CORRIDA
+          </button>
+        `
+        : ""
+      }
+    </div>
+  `).join("");
+
+  async function cancelarCorrida(id){
+    if(!confirm("Tem certeza que deseja cancelar esta corrida?")){
+      return;
+    }
+
+    try{
+      const r = await fetch(
+        "/api/corrida/" + id + "/cancelar",
+        {
+          method:"POST",
+          credentials:"same-origin"
+        }
+      );
+
+      const d = await r.json();
+
+      if(!d.ok){
+        msg(d.erro || "Não foi possível cancelar a corrida.","erro");
+        return;
+      }
+
+      msg("Corrida cancelada com sucesso.","sucesso");
+
+      carregarCorridas();
+
+    }catch(e){
+      msg("Erro ao cancelar a corrida.","erro");
+    }
+  }
 }
 carregarCorridas();
 </script>
@@ -3351,6 +3405,17 @@ def motorista():
 
             etapa = str(c["etapa"] or "AGUARDANDO")
 
+
+            if c["status"] in ("ACEITA", "EM_ANDAMENTO"):
+                acoes += f"""
+                <form method="POST"
+                      action="/motorista/cancelar/{c["id"]}"
+                      onsubmit="return confirm('Tem certeza que deseja cancelar esta corrida?');">
+                    <button class="motor-btn vermelho" type="submit">
+                        🔴 CANCELAR CORRIDA
+                    </button>
+                </form>
+                """
             if c["status"] == "ACEITA" and etapa in ("AGUARDANDO", ""):
                 acoes = f"""
                 <a class="motor-btn azul"
@@ -3426,6 +3491,13 @@ def motorista():
 
     corpo_motorista = f"""
 <style>
+.motor-btn.vermelho {{
+    background:#b00000 !important;
+    color:#fff !important;
+    border:3px solid #fff !important;
+    font-weight:900 !important;
+}}
+
 .motor-status {{
     padding:16px;
     border-radius:14px;
@@ -3773,6 +3845,30 @@ def motorista_aceitar(id):
             '<div class="alert erro">Essa corrida já foi aceita por outro motorista.</div>'
             '<a class="pub-btn pub-green" href="/motorista">Voltar</a>'
         )
+
+    return redirect(url_for("motorista"))
+
+
+@app.route("/motorista/cancelar/<int:id>", methods=["POST"])
+def motorista_cancelar_corrida(id):
+    mid = _motorista_logado()
+
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    conn = conectar()
+
+    cur = conn.execute("""
+        UPDATE corridas_vai
+        SET status='CANCELADA',
+            cancelado_em=CURRENT_TIMESTAMP
+        WHERE id=?
+          AND motorista_id=?
+          AND status IN ('ACEITA','EM_ANDAMENTO')
+    """, (id, mid))
+
+    conn.commit()
+    conn.close()
 
     return redirect(url_for("motorista"))
 
