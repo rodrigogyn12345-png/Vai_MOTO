@@ -4028,7 +4028,7 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
-  function beep(freq, inicio, duracao, tipo="triangle", volume=0.95){
+  function beep(freq, inicio, duracao, tipo="square", volume=1.0){
     try{
       if(!ctx){
         ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -4043,13 +4043,22 @@ def alerta_sonoro_motorista(response):
       const g = ctx.createGain();
 
       o.type = tipo;
-      o.frequency.setValueAtTime(freq, agora + inicio);
 
-      g.gain.setValueAtTime(0.0001, agora + inicio);
+      o.frequency.setValueAtTime(
+        freq,
+        agora + inicio
+      );
+
+      g.gain.setValueAtTime(
+        0.0001,
+        agora + inicio
+      );
+
       g.gain.exponentialRampToValueAtTime(
         volume,
-        agora + inicio + 0.025
+        agora + inicio + 0.02
       );
+
       g.gain.exponentialRampToValueAtTime(
         0.0001,
         agora + inicio + duracao
@@ -4059,7 +4068,9 @@ def alerta_sonoro_motorista(response):
       g.connect(ctx.destination);
 
       o.start(agora + inicio);
-      o.stop(agora + inicio + duracao + 0.08);
+      o.stop(
+        agora + inicio + duracao + 0.1
+      );
     }catch(e){}
   }
 
@@ -4074,7 +4085,7 @@ def alerta_sonoro_motorista(response):
       );
 
       fala.lang = "pt-BR";
-      fala.rate = 0.85;
+      fala.rate = 0.75;
       fala.pitch = 1.0;
       fala.volume = 1.0;
 
@@ -4091,187 +4102,28 @@ def alerta_sonoro_motorista(response):
     function chamada(){
       if(!tocando) return;
 
-      // 🔔 TOQUE FORTE E CHAMATIVO
-      beep(740, 0.00, 0.28, "triangle", 0.95);
-      beep(988, 0.32, 0.28, "triangle", 0.95);
+      // TOQUE FORTE E CHAMATIVO
+      beep(880,  0.00, 0.22, "square",   1.0);
+      beep(1175, 0.25, 0.22, "square",   1.0);
+      beep(1480, 0.50, 0.22, "triangle", 1.0);
 
-      beep(740, 0.72, 0.28, "square", 0.85);
-      beep(1175, 1.04, 0.38, "triangle", 0.95);
+      beep(880,  0.82, 0.22, "square",   1.0);
+      beep(1175, 1.07, 0.22, "square",   1.0);
+      beep(1480, 1.32, 0.30, "triangle", 1.0);
 
-      // Voz depois do toque
+      // FALA
       setTimeout(function(){
         if(tocando){
           falarNovaCorrida();
         }
-      }, 1550);
+      }, 1750);
     }
 
     chamada();
 
-    // Repete enquanto existir corrida disponível
+    // Repete a chamada enquanto houver corrida
     intervalo = setInterval(chamada, 4200);
   }
-
-  function pararChamada(){
-    tocando = false;
-
-    if(intervalo){
-      clearInterval(intervalo);
-      intervalo = null;
-    }
-  }
-
-  // Qualquer toque do motorista libera o áudio.
-  document.addEventListener("click", function(){
-    liberarAudio();
-  });
-
-  document.addEventListener("touchstart", function(){
-    liberarAudio();
-  }, {passive:true});
-
-  let contadorCorridaIntervalo = null;
-  let contadorCorrida = 0;
-
-  function pararContagemCorrida(){
-    if(contadorCorridaIntervalo){
-      clearInterval(contadorCorridaIntervalo);
-      contadorCorridaIntervalo = null;
-    }
-
-    const painel = document.getElementById("contador-nova-corrida");
-    if(painel){
-      painel.remove();
-    }
-  }
-
-  function iniciarContagemCorrida(){
-    pararContagemCorrida();
-
-    contadorCorrida = 9;
-
-    const painel = document.createElement("div");
-    painel.id = "contador-nova-corrida";
-    painel.style.cssText = `
-      position:fixed;
-      top:12px;
-      left:50%;
-      transform:translateX(-50%);
-      z-index:99999;
-      width:calc(100% - 24px);
-      max-width:500px;
-      box-sizing:border-box;
-      background:#b00000;
-      color:#fff;
-      border-radius:16px;
-      padding:16px 12px;
-      text-align:center;
-      font-weight:bold;
-      box-shadow:0 6px 25px rgba(0,0,0,.45);
-      border:3px solid #fff;
-    `;
-
-    painel.innerHTML = `
-      <div style="font-size:22px;">🚨 NOVA CORRIDA!</div>
-      <div style="font-size:17px;margin-top:4px;">Aceite a corrida antes que o tempo termine</div>
-      <div id="numero-contador-corrida"
-           style="font-size:52px;line-height:1.05;margin-top:6px;">
-        10
-      </div>
-      <div style="font-size:15px;">segundos</div>
-    `;
-
-    document.body.appendChild(painel);
-
-    contadorCorridaIntervalo = setInterval(function(){
-      contadorCorrida--;
-
-      const numero = document.getElementById("numero-contador-corrida");
-
-      if(numero){
-        numero.textContent = contadorCorrida;
-      }
-
-      if(contadorCorrida <= 0){
-        clearInterval(contadorCorridaIntervalo);
-        contadorCorridaIntervalo = null;
-
-        if(numero){
-          numero.textContent = "0";
-        }
-
-        const texto = painel.querySelector("div:nth-child(2)");
-        if(texto){
-          texto.textContent = "⏰ Tempo para aceitar encerrado";
-        }
-
-        setTimeout(function(){
-          const p = document.getElementById("contador-nova-corrida");
-          if(p){
-            p.remove();
-          }
-        }, 2500);
-      }
-    }, 1000);
-  }
-
-  async function verificarCorridas(){
-    try{
-      const r = await fetch("/api/corridas-disponiveis", {
-        cache: "no-store",
-        credentials: "same-origin"
-      });
-
-      if(!r.ok) return;
-
-      const d = await r.json();
-
-      if(!d.ok) return;
-
-      const quantidade = Array.isArray(d.corridas)
-        ? d.corridas.length
-        : 0;
-
-      if(quantidade > ultimaQuantidade){
-        tocarChamada();
-        iniciarContagemCorrida();
-      }
-
-      if(quantidade === 0){
-        pararChamada();
-        pararContagemCorrida();
-      }
-
-      ultimaQuantidade = quantidade;
-
-      localStorage.setItem(
-        "vai_moto_qtd_corridas",
-        String(quantidade)
-      );
-
-    }catch(e){}
-  }
-
-  verificarCorridas();
-  setInterval(verificarCorridas, 2000);
-
-  document.addEventListener("submit", function(e){
-    const form = e.target;
-
-    if(
-      form &&
-      form.action &&
-      form.action.includes("/motorista/aceitar/")
-    ){
-      pararChamada();
-      pararContagemCorrida();
-
-      localStorage.setItem(
-        "vai_moto_qtd_corridas",
-        "0"
-      );
-    }
-  });
 
   window.testarSomVaiDeMoto = function(){
     liberarAudio();
