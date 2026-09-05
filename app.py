@@ -4023,7 +4023,7 @@ def alerta_sonoro_motorista(response):
       window.speechSynthesis.cancel();
 
       const fala = new SpeechSynthesisUtterance(
-        "VAI DE MOTO! Nova corrida disponível!"
+        "VAI-DE-MOTO!"
       );
 
       fala.lang = "pt-BR";
@@ -4101,7 +4101,7 @@ def alerta_sonoro_motorista(response):
   function iniciarContagemCorrida(){
     pararContagemCorrida();
 
-    contadorCorrida = 10;
+    contadorCorrida = 9;
 
     const painel = document.createElement("div");
     painel.id = "contador-nova-corrida";
