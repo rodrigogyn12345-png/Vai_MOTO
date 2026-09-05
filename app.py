@@ -3430,7 +3430,7 @@ def motorista():
                     🗺️ GOOGLE MAPS — IR ATÉ O PASSAGEIRO
                 </a>
                 <a class="motor-btn azul"
-       href="https://waze.com/ul?q={waze_origem}&navigate=yes"
+       href="https://waze.com/ul?q={quote(str(c["origem"] or ""), safe="")}&navigate=yes"
        target="_blank">
         🚗 WAZE — IR ATÉ O PASSAGEIRO
     </a>
@@ -3458,7 +3458,7 @@ def motorista():
                     🗺️ GOOGLE MAPS — IR ATÉ O DESTINO
                 </a>
                 <a class="motor-btn azul"
-       href="https://waze.com/ul?q={waze_destino}&navigate=yes"
+       href="https://waze.com/ul?q={quote(str(c["destino"] or ""), safe="")}&navigate=yes"
        target="_blank">
         🚗 WAZE — IR ATÉ O DESTINO
     </a>
