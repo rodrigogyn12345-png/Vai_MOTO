@@ -2318,6 +2318,47 @@ def passageiro():
 
     nome = session.get("passageiro_nome", "Passageiro")
     return _pagina_publica("Passageiro", """
+
+<style>
+/* ===== PAINEL DO PASSAGEIRO - LETRAS MAIORES ===== */
+.pub-nav a {
+    font-size:20px !important;
+    padding:15px 12px !important;
+}
+
+.pub-info {
+    font-size:20px !important;
+    line-height:1.45;
+}
+
+.pub-card h3 {
+    font-size:25px !important;
+    line-height:1.3;
+}
+
+.pub-card p,
+.pub-card small {
+    font-size:18px !important;
+    line-height:1.45;
+}
+
+.pub-input {
+    font-size:19px !important;
+    padding:16px !important;
+}
+
+.pub-btn {
+    font-size:19px !important;
+    min-height:54px;
+    padding:16px !important;
+}
+
+.pub-card label {
+    font-size:19px !important;
+}
+
+</style>
+
       <div class="pub-nav">
         <a href="/passageiro">🏠 Início</a>
         <a href="/logout-usuario">🚪 Sair</a>
