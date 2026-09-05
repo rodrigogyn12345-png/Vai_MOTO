@@ -3507,6 +3507,31 @@ def motorista():
 
     corpo_motorista = f"""
 <style>
+/* BOTÕES DE NAVEGAÇÃO ATÉ O PASSAGEIRO */
+a[href*="google.com/maps/dir"] {{
+    width: 100% !important;
+    min-height: 90px !important;
+    padding: 22px 14px !important;
+    font-size: 25px !important;
+    font-weight: 900 !important;
+    border-radius: 18px !important;
+    margin: 12px 0 !important;
+    display: block !important;
+    box-sizing: border-box !important;
+}}
+
+a[href*="waze.com/ul"] {{
+    width: 100% !important;
+    min-height: 90px !important;
+    padding: 22px 14px !important;
+    font-size: 25px !important;
+    font-weight: 900 !important;
+    border-radius: 18px !important;
+    margin: 12px 0 !important;
+    display: block !important;
+    box-sizing: border-box !important;
+}}
+
 /* BOTÃO ACEITAR CORRIDA GRANDE */
 form[action^="/motorista/aceitar/"] .motor-btn {{
     width: 100% !important;
@@ -3774,6 +3799,139 @@ button {{
         grid-template-columns:1fr;
     }}
 }}
+/* ===== NOVO VISUAL MOTORISTA ===== */
+
+body {{
+    background:#080808 !important;
+    color:#fff !important;
+}}
+
+.motor-menu {{
+    gap:10px;
+}}
+
+.motor-menu a {{
+    background:#151515 !important;
+    color:#fff !important;
+    border:1px solid #333 !important;
+    border-radius:14px !important;
+}}
+
+h2 {{
+    color:#fff !important;
+    font-size:30px !important;
+    font-weight:900 !important;
+}}
+
+.pub-info {{
+    background:#151515 !important;
+    color:#fff !important;
+    border:1px solid #333 !important;
+    border-radius:16px !important;
+}}
+
+.pub-card {{
+    background:#111 !important;
+    color:#fff !important;
+    border:1px solid #292929 !important;
+    border-radius:20px !important;
+    padding:20px !important;
+    box-shadow:0 6px 20px rgba(0,0,0,.35) !important;
+}}
+
+.pub-card h3 {{
+    color:#fff !important;
+    font-size:23px !important;
+    font-weight:900 !important;
+}}
+
+.pub-card p {{
+    color:#ccc !important;
+}}
+
+.corrida,
+.corrida.disponivel {{
+    background:#181818 !important;
+    color:#fff !important;
+    border:1px solid #333 !important;
+    border-radius:18px !important;
+    padding:18px !important;
+}}
+
+.corrida-topo {{
+    color:#fff !important;
+}}
+
+.corrida-topo span {{
+    background:#292929 !important;
+    color:#fff !important;
+}}
+
+.linha {{
+    color:#eee !important;
+}}
+
+.valores div {{
+    background:#222 !important;
+    color:#fff !important;
+    border:1px solid #333 !important;
+}}
+
+.valores small {{
+    color:#aaa !important;
+}}
+
+.valores strong {{
+    color:#fff !important;
+    font-size:23px !important;
+}}
+
+.ganhos-box {{
+    background:#181818 !important;
+    color:#fff !important;
+    border:1px solid #333 !important;
+    border-radius:18px !important;
+}}
+
+.ganho-num {{
+    color:#fff !important;
+    font-size:32px !important;
+}}
+
+.motor-status.online {{
+    background:#123d20 !important;
+    color:#43e56b !important;
+    border:2px solid #43e56b !important;
+}}
+
+.motor-status.offline {{
+    background:#222 !important;
+    color:#aaa !important;
+    border:1px solid #444 !important;
+}}
+
+.motor-btn {{
+    border-radius:16px !important;
+}}
+
+a[href*="google.com/maps/dir"],
+a[href*="waze.com/ul"] {{
+    min-height:90px !important;
+    font-size:25px !important;
+    font-weight:900 !important;
+}}
+
+@media(max-width:600px) {{
+    .pub-card {{
+        margin-left:-4px;
+        margin-right:-4px;
+    }}
+
+    .corrida {{
+        padding:16px !important;
+    }}
+}}
+
 </style>
 
 <div class="motor-menu">
