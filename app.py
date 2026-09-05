@@ -1,3 +1,4 @@
+import unicodedata
 from pathlib import Path
 from flask import send_from_directory, send_file
 import os
@@ -4282,10 +4283,448 @@ def api_motorista_som_dinheiro():
 @app.route("/api/buscar-enderecos", methods=["POST"])
 def api_buscar_enderecos():
     data = _json()
+
     q = " ".join((data.get("q") or "").split()).strip()
 
     if not q:
         return {"ok": False, "resultados": []}
+
+    # GPS do passageiro.
+    # Serve para PRIORIZAR resultados próximos.
+    # Nunca limita a busca a uma cidade específica.
+    gps_lat = data.get("lat")
+    gps_lon = data.get("lon")
+
+    try:
+        gps_lat = float(gps_lat) if gps_lat not in (None, "") else None
+        gps_lon = float(gps_lon) if gps_lon not in (None, "") else None
+    except Exception:
+        gps_lat = None
+        gps_lon = None
+
+    resultados = []
+
+    def normalizar(texto):
+        return " ".join((texto or "").lower().split()).strip()
+
+    def sem_acentos(texto):
+        texto = str(texto or "")
+        return "".join(
+            c for c in unicodedata.normalize("NFD", texto)
+            if unicodedata.category(c) != "Mn"
+        )
+
+    def adicionar(lat, lon, nome, fonte=""):
+        if lat in (None, "") or lon in (None, ""):
+            return
+
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception:
+            return
+
+        nome = str(nome or "").strip()
+
+        if not nome:
+            nome = "Endereço encontrado"
+
+        # Evita duplicados.
+        chave = (round(lat_f, 6), round(lon_f, 6))
+
+        for r in resultados:
+            try:
+                chave2 = (
+                    round(float(r["lat"]), 6),
+                    round(float(r["lon"]), 6)
+                )
+
+                if chave == chave2:
+                    return
+            except Exception:
+                pass
+
+        resultados.append({
+            "display_name": nome,
+            "lat": str(lat_f),
+            "lon": str(lon_f),
+            "_fonte": fonte
+        })
+
+    # =========================================================
+    # CORREÇÕES DE DIGITAÇÃO
+    # =========================================================
+
+    correcoes = {
+        "girasol": "girassol",
+        "aragoiania": "aragoiânia",
+        "aragoiania go": "aragoiânia GO",
+        "aragoiania goias": "aragoiânia Goiás"
+    }
+
+    q_corrigido = q
+
+    for errado, correto in correcoes.items():
+        q_corrigido = q_corrigido.replace(errado, correto)
+
+    # =========================================================
+    # MONTA VÁRIAS FORMAS DA PESQUISA
+    # =========================================================
+
+    consultas = []
+
+    def adicionar_consulta(valor):
+        valor = " ".join((valor or "").split()).strip()
+
+        if not valor:
+            return
+
+        chave = normalizar(valor)
+
+        if chave not in {normalizar(x) for x in consultas}:
+            consultas.append(valor)
+
+    adicionar_consulta(q)
+    adicionar_consulta(q_corrigido)
+
+    # Também tenta a versão sem acentos.
+    # Isso ajuda em nomes como Aragoiânia/Aragoiania,
+    # João/Joao, São/Sao, etc.
+    adicionar_consulta(sem_acentos(q))
+    adicionar_consulta(sem_acentos(q_corrigido))
+
+    # Algumas ruas e locais possuem grafias diferentes
+    # cadastradas nos mapas.
+    q_izabel = q_corrigido.replace(
+        "Isabel", "Izabel"
+    ).replace(
+        "isabel", "izabel"
+    )
+
+    q_isabel = q_corrigido.replace(
+        "Izabel", "Isabel"
+    ).replace(
+        "izabel", "isabel"
+    )
+
+    adicionar_consulta(q_izabel)
+    adicionar_consulta(q_isabel)
+
+    # Brasil ajuda o geocodificador a interpretar a pesquisa.
+    adicionar_consulta(q + ", Brasil")
+    adicionar_consulta(q_corrigido + ", Brasil")
+
+    # Se o usuário estiver procurando um estabelecimento,
+    # também tentamos retirar palavras genéricas.
+    # Ex.: "Escola Municipal Padre João Bosco"
+    # -> "Padre João Bosco"
+    termos_genericos = {
+        "escola",
+        "municipal",
+        "estadual",
+        "colégio",
+        "colegio",
+        "creche",
+        "unidade",
+        "posto",
+        "igreja",
+        "hospital",
+        "mercado",
+        "supermercado",
+        "farmácia",
+        "farmacia"
+    }
+
+    palavras = q_corrigido.split()
+
+    palavras_reduzidas = [
+        p for p in palavras
+        if normalizar(p).strip(",") not in termos_genericos
+    ]
+
+    if len(palavras_reduzidas) >= 2:
+        adicionar_consulta(" ".join(palavras_reduzidas))
+        adicionar_consulta(
+            " ".join(palavras_reduzidas) + ", Brasil"
+        )
+
+    # =========================================================
+    # 1) NOMINATIM / OPENSTREETMAP
+    # =========================================================
+
+    for consulta in consultas:
+        try:
+            params_dict = {
+                "q": consulta,
+                "format": "jsonv2",
+                "limit": 10,
+                "countrycodes": "br",
+                "addressdetails": 1,
+                "dedupe": 1,
+                "accept-language": "pt-BR"
+            }
+
+            # Viewbox é apenas preferência.
+            # NÃO usamos bounded=1.
+            if gps_lat is not None and gps_lon is not None:
+                margem = 0.35
+
+                params_dict["viewbox"] = ",".join([
+                    str(gps_lon - margem),
+                    str(gps_lat + margem),
+                    str(gps_lon + margem),
+                    str(gps_lat - margem)
+                ])
+
+            params = urlencode(params_dict)
+
+            req = Request(
+                "https://nominatim.openstreetmap.org/search?" + params,
+                headers={
+                    "User-Agent":
+                        "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                }
+            )
+
+            with urlopen(req, timeout=10) as resp:
+                arr = json.loads(
+                    resp.read().decode("utf-8")
+                )
+
+            for x in arr:
+                adicionar(
+                    x.get("lat"),
+                    x.get("lon"),
+                    x.get("display_name", ""),
+                    "nominatim"
+                )
+
+        except Exception:
+            continue
+
+    # =========================================================
+    # 2) PHOTON / KOMOOT
+    # =========================================================
+
+    for consulta in consultas:
+        try:
+            params_dict = {
+                "q": consulta,
+                "limit": 10,
+                "lang": "pt"
+            }
+
+            # GPS ajuda o Photon a trazer primeiro
+            # os resultados próximos.
+            if gps_lat is not None and gps_lon is not None:
+                params_dict["lat"] = gps_lat
+                params_dict["lon"] = gps_lon
+
+            params = urlencode(params_dict)
+
+            req = Request(
+                "https://photon.komoot.io/api/?" + params,
+                headers={
+                    "User-Agent":
+                        "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                }
+            )
+
+            with urlopen(req, timeout=10) as resp:
+                dados = json.loads(
+                    resp.read().decode("utf-8")
+                )
+
+            for feature in dados.get("features", []):
+                geom = feature.get("geometry", {})
+                coords = geom.get("coordinates", [])
+
+                if len(coords) < 2:
+                    continue
+
+                lon = coords[0]
+                lat = coords[1]
+
+                props = feature.get("properties", {})
+
+                partes = []
+
+                for chave in (
+                    "name",
+                    "street",
+                    "housenumber",
+                    "district",
+                    "city",
+                    "county",
+                    "state",
+                    "country",
+                    "postcode"
+                ):
+                    valor = props.get(chave)
+
+                    if valor and str(valor) not in partes:
+                        partes.append(str(valor))
+
+                nome = ", ".join(partes)
+
+                adicionar(
+                    lat,
+                    lon,
+                    nome,
+                    "photon"
+                )
+
+        except Exception:
+            continue
+
+    # =========================================================
+    # 3) ARCGIS WORLD GEOCODING
+    # =========================================================
+    # Complementa Nominatim + Photon para POIs, escolas,
+    # comércios, ruas e endereços que não estejam bem
+    # indexados nas outras fontes.
+    # A busca continua nacional e o GPS apenas ajuda
+    # a priorizar a região do passageiro.
+    # =========================================================
+
+    try:
+        consultas_arcgis = []
+
+        for consulta in consultas:
+            if consulta not in consultas_arcgis:
+                consultas_arcgis.append(consulta)
+
+        # A consulta original/corrigida é a mais importante.
+        for consulta in consultas_arcgis:
+            try:
+                params_dict = {
+                    "SingleLine": consulta,
+                    "countryCode": "BRA",
+                    "maxLocations": 10,
+                    "f": "json"
+                }
+
+                # O GPS é usado como ponto de preferência.
+                if gps_lat is not None and gps_lon is not None:
+                    params_dict["location"] = (
+                        f"{gps_lon},{gps_lat}"
+                    )
+
+                params = urlencode(params_dict)
+
+                req = Request(
+                    "https://geocode.arcgis.com/arcgis/rest/services/"
+                    "World/GeocodeServer/findAddressCandidates?"
+                    + params,
+                    headers={
+                        "User-Agent":
+                            "VAI_DE_MOTO/1.0 (aplicativo de transporte)"
+                    }
+                )
+
+                with urlopen(req, timeout=10) as resp:
+                    dados = json.loads(
+                        resp.read().decode("utf-8")
+                    )
+
+                for candidato in dados.get("candidates", []):
+                    endereco = candidato.get(
+                        "address",
+                        ""
+                    )
+
+                    localizacao = candidato.get(
+                        "location",
+                        {}
+                    )
+
+                    adicionar(
+                        localizacao.get("y"),
+                        localizacao.get("x"),
+                        endereco,
+                        "arcgis"
+                    )
+
+            except Exception:
+                continue
+
+    except Exception:
+        pass
+
+    # =========================================================
+    # 4) ORDENAÇÃO INTELIGENTE
+    # =========================================================
+
+    termos_busca = [
+        x.strip(" ,.-").lower()
+        for x in q_corrigido.split()
+        if len(x.strip(" ,.-")) >= 3
+    ]
+
+    def pontuacao(item):
+        nome = normalizar(item.get("display_name", ""))
+
+        # Quanto mais palavras da busca aparecem no resultado,
+        # melhor a pontuação.
+        correspondencias = 0
+
+        for termo in termos_busca:
+            if termo in nome:
+                correspondencias += 1
+
+        # Distância aproximada do GPS.
+        distancia = 999999.0
+
+        if gps_lat is not None and gps_lon is not None:
+            try:
+                lat = float(item["lat"])
+                lon = float(item["lon"])
+
+                # Aproximação suficiente para ordenar resultados.
+                dlat = (lat - gps_lat) * 111.0
+                dlon = (
+                    (lon - gps_lon)
+                    * 111.0
+                    * __import__("math").cos(
+                        __import__("math").radians(gps_lat)
+                    )
+                )
+
+                distancia = (
+                    (dlat * dlat + dlon * dlon)
+                    ** 0.5
+                )
+            except Exception:
+                pass
+
+        # Correspondência de texto pesa bastante.
+        # Proximidade desempata resultados parecidos.
+        score = (
+            correspondencias * 1000
+            - min(distancia, 500) * 2
+        )
+
+        return score
+
+    resultados.sort(
+        key=pontuacao,
+        reverse=True
+    )
+
+    # Remove campo interno antes de enviar ao navegador.
+    saida = []
+
+    for item in resultados[:15]:
+        saida.append({
+            "display_name": item["display_name"],
+            "lat": item["lat"],
+            "lon": item["lon"]
+        })
+
+    return {
+        "ok": True,
+        "resultados": saida
+    }
 
     # GPS atual do passageiro: usado apenas para priorizar
     # resultados próximos, sem limitar a busca à cidade atual.
@@ -4376,7 +4815,7 @@ def api_buscar_enderecos():
 
     for consulta in consultas:
         try:
-            params = urlencode({
+            params_dict = {
                 "q": consulta,
                 "format": "jsonv2",
                 "limit": 10,
@@ -4384,18 +4823,20 @@ def api_buscar_enderecos():
                 "addressdetails": 1,
                 "dedupe": 1,
                 "accept-language": "pt-BR"
-            })
+            }
 
             # Quando temos GPS, usamos uma área ao redor do passageiro
             # apenas como prioridade de busca. A busca continua nacional.
             if gps_lat is not None and gps_lon is not None:
                 margem = 0.35
-                params["viewbox"] = ",".join([
+                params_dict["viewbox"] = ",".join([
                     str(gps_lon - margem),
                     str(gps_lat + margem),
                     str(gps_lon + margem),
                     str(gps_lat - margem)
                 ])
+
+            params = urlencode(params_dict)
 
             req = Request(
                 "https://nominatim.openstreetmap.org/search?" + params,
