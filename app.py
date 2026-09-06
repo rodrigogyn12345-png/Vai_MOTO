@@ -87,7 +87,7 @@ def criar_checkout_asaas(corrida_id, valor, origem, destino):
             dados = json.loads(resp.read().decode("utf-8"))
 
         checkout_id = dados.get("id")
-        checkout_url = dados.get("url") or (f"https://asaas.com/checkoutSession/show?id={checkout_id}" if checkout_id else "")
+        checkout_url = dados.get("link") or dados.get("url") or (f"https://sandbox.asaas.com/checkoutSession/show?id={checkout_id}" if checkout_id else "")
 
         if not checkout_id or not checkout_url:
             return None, None, "Asaas não retornou o link do Checkout."
