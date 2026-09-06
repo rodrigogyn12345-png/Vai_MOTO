@@ -442,63 +442,63 @@ th{background:#f5f5f5}
 /* ===== VAI_DE_MOTO - LETRAS GRANDES MOTORISTA E PASSAGEIRO ===== */
 
 .motor-menu a {
-    font-size: 42px !important;
+    font-size: 50px !important;
     line-height: 1.2 !important;
     padding: 24px 16px !important;
     min-height: 85px !important;
 }
 
 .pub-info {
-    font-size: 42px !important;
+    font-size: 50px !important;
     line-height: 1.4 !important;
     padding: 28px !important;
 }
 
 .pub-card h3 {
-    font-size: 48px !important;
+    font-size: 54px !important;
     line-height: 1.25 !important;
 }
 
 .pub-card p,
 .pub-card small {
-    font-size: 36px !important;
+    font-size: 42px !important;
     line-height: 1.45 !important;
 }
 
 .pub-card label {
-    font-size: 36px !important;
+    font-size: 42px !important;
     line-height: 1.4 !important;
 }
 
 .pub-input {
-    font-size: 36px !important;
+    font-size: 42px !important;
     padding: 24px !important;
     min-height: 75px !important;
 }
 
 .pub-btn {
-    font-size: 38px !important;
+    font-size: 44px !important;
     line-height: 1.25 !important;
     min-height: 80px !important;
     padding: 24px !important;
 }
 
 .pub-price {
-    font-size: 56px !important;
+    font-size: 62px !important;
     font-weight: 900 !important;
 }
 
 .ganho-num {
-    font-size: 48px !important;
+    font-size: 54px !important;
 }
 
 h2 {
-    font-size: 48px !important;
+    font-size: 54px !important;
     line-height: 1.25 !important;
 }
 
 h3 {
-    font-size: 42px !important;
+    font-size: 50px !important;
 }
 
 button,
@@ -517,16 +517,16 @@ textarea {
 /* No celular */
 @media(max-width:600px) {
     .motor-menu a {
-        font-size: 38px !important;
+        font-size: 44px !important;
         min-height: 82px !important;
     }
 
     .pub-info {
-        font-size: 36px !important;
+        font-size: 42px !important;
     }
 
     .pub-card h3 {
-        font-size: 42px !important;
+        font-size: 50px !important;
     }
 
     .pub-card p,
@@ -560,7 +560,7 @@ textarea {
     }
 
     h3 {
-        font-size: 38px !important;
+        font-size: 44px !important;
     }
 
     button,
