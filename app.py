@@ -20,11 +20,82 @@ app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
 DB = "vai_de_moto.db"
 LIMITE_MOTOQUEIROS = 20
 
+# =========================================================
+# ASAAS - PAGAMENTOS
+# A chave fica somente em variável de ambiente.
+# =========================================================
+ASAAS_API_KEY = os.getenv("ASAAS_API_KEY", "").strip()
+ASAAS_BASE_URL = os.getenv(
+    "ASAAS_BASE_URL",
+    "https://api-sandbox.asaas.com/v3"
+).rstrip("/")
+
+ASAAS_WEBHOOK_TOKEN = os.getenv(
+    "ASAAS_WEBHOOK_TOKEN",
+    ""
+).strip()
+
 
 def conectar():
     conn = sqlite3.connect(DB)
     conn.row_factory = sqlite3.Row
     return conn
+
+
+
+def criar_checkout_asaas(corrida_id, valor, origem, destino):
+    """
+    Cria um Checkout Asaas para uma corrida.
+    Retorna (checkout_id, checkout_url, erro).
+    """
+    if not ASAAS_API_KEY:
+        return None, None, "ASAAS_API_KEY não configurada."
+
+    try:
+        payload = {
+            "billingTypes": ["PIX", "CREDIT_CARD"],
+            "chargeTypes": ["DETACHED"],
+            "minutesToExpire": 60,
+            "externalReference": f"corrida-{corrida_id}",
+            "callback": {
+                "successUrl": f"{request.url_root.rstrip('/')}/passageiro",
+                "cancelUrl": f"{request.url_root.rstrip('/')}/passageiro",
+                "expiredUrl": f"{request.url_root.rstrip('/')}/passageiro"
+            },
+            "items": [
+                {
+                    "name": f"Corrida VAI_DE_MOTO #{corrida_id}",
+                    "description": f"{origem} → {destino}",
+                    "quantity": 1,
+                    "value": float(valor)
+                }
+            ]
+        }
+
+        req = Request(
+            ASAAS_BASE_URL + "/checkouts",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "VAI_DE_MOTO/1.0",
+                "access_token": ASAAS_API_KEY
+            },
+            method="POST"
+        )
+
+        with urlopen(req, timeout=20) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+
+        checkout_id = dados.get("id")
+        checkout_url = dados.get("url") or (f"https://asaas.com/checkoutSession/show?id={checkout_id}" if checkout_id else "")
+
+        if not checkout_id or not checkout_url:
+            return None, None, "Asaas não retornou o link do Checkout."
+
+        return checkout_id, checkout_url, None
+
+    except Exception as e:
+        return None, None, f"Erro ao criar Checkout Asaas: {e}"
 
 
 def iniciar_banco():
@@ -149,6 +220,16 @@ def iniciar_banco():
         pass
     try:
         conn.execute("ALTER TABLE corridas_vai ADD COLUMN valor_motorista REAL DEFAULT 0")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN asaas_checkout_id TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN asaas_checkout_url TEXT DEFAULT ''")
     except Exception:
         pass
     try:
@@ -3129,8 +3210,21 @@ async function solicitar(){
   const r=await fetch("/api/solicitar-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
   const d=await r.json();
   if(!d.ok){msg(d.erro||"Erro ao solicitar corrida.","erro");return;}
-  msg("Corrida solicitada! Aguarde um motorista.","sucesso");
   document.getElementById("solicitar").style.display="none";
+
+  if(d.checkout_url){
+    msg(
+      'Corrida criada!<br><br>' +
+      '<a href="' + d.checkout_url + '" target="_blank" ' +
+      'class="pub-btn pub-green" style="display:block;text-align:center;text-decoration:none">' +
+      '💳 PAGAR COM PIX / CARTÃO' +
+      '</a>',
+      "sucesso"
+    );
+  }else{
+    msg("Corrida solicitada! Aguarde um motorista.","sucesso");
+  }
+
   carregarCorridas();
 }
 async function carregarCorridas(){
@@ -5065,7 +5159,59 @@ def api_solicitar_corrida():
     corrida_id = cur.lastrowid
     conn.close()
 
-    return {"ok": True, "id": corrida_id, "valor": valor, "taxa_app": taxa, "valor_motorista": valor_motorista}
+    # =========================================================
+    # ASAAS - cria Checkout para pagamento online
+    # =========================================================
+    checkout_url = ""
+
+    if pagamento == "PIX":
+        checkout_id, checkout_url, erro_asaas = criar_checkout_asaas(
+            corrida_id,
+            valor,
+            origem,
+            destino
+        )
+
+        if erro_asaas:
+            # Não deixa uma corrida PIX criada sem Checkout.
+            conn = conectar()
+            conn.execute(
+                "DELETE FROM corridas_vai WHERE id=? AND passageiro_id=?",
+                (corrida_id, pid)
+            )
+            conn.commit()
+            conn.close()
+
+            return {
+                "ok": False,
+                "erro": erro_asaas
+            }
+
+        conn = conectar()
+        conn.execute("""
+            UPDATE corridas_vai
+            SET asaas_checkout_id=?,
+                asaas_checkout_url=?
+            WHERE id=? AND passageiro_id=?
+        """, (
+            checkout_id,
+            checkout_url,
+            corrida_id,
+            pid
+        ))
+        conn.commit()
+        conn.close()
+
+    return {
+        "ok": True,
+        "id": corrida_id,
+        "valor": valor,
+        "taxa_app": taxa,
+        "valor_motorista": valor_motorista,
+        "pagamento": pagamento,
+        "pagamento_status": pagamento_status,
+        "checkout_url": checkout_url
+    }
 
 
 @app.route("/api/minhas-corridas")
@@ -5292,6 +5438,119 @@ api_motoqueiro_status = api_motorista_status
 # ==============================
 # PWA VAI_DE_MOTO
 # ==============================
+
+
+@app.route("/asaas/webhook", methods=["POST"])
+def asaas_webhook():
+    # O Asaas envia o token configurado no Webhook
+    # pelo header "asaas-access-token".
+    if not ASAAS_WEBHOOK_TOKEN:
+        return {"ok": False, "erro": "Webhook Asaas não configurado."}, 503
+
+    token_recebido = request.headers.get(
+        "asaas-access-token",
+        ""
+    ).strip()
+
+    if token_recebido != ASAAS_WEBHOOK_TOKEN:
+        return {"ok": False, "erro": "Não autorizado."}, 401
+
+    data = request.get_json(silent=True) or {}
+
+    evento_id = str(data.get("id") or "").strip()
+    evento = str(data.get("event") or "").strip().upper()
+    checkout = data.get("checkout") or {}
+    checkout_id = str(checkout.get("id") or "").strip()
+
+    if not evento_id or not evento:
+        return {"ok": False, "erro": "Evento inválido."}, 400
+
+    # Idempotência: o mesmo evento pode ser enviado mais de uma vez.
+    conn = conectar()
+
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS asaas_webhook_eventos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            evento_id TEXT UNIQUE NOT NULL,
+            evento TEXT DEFAULT '',
+            checkout_id TEXT DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    try:
+        conn.execute("""
+            INSERT INTO asaas_webhook_eventos
+            (evento_id, evento, checkout_id)
+            VALUES (?, ?, ?)
+        """, (evento_id, evento, checkout_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.close()
+        return {"ok": True, "duplicado": True}
+
+    # Localiza a corrida pelo Checkout ID.
+    corrida = None
+
+    if checkout_id:
+        corrida = conn.execute("""
+            SELECT id
+            FROM corridas_vai
+            WHERE asaas_checkout_id=?
+            LIMIT 1
+        """, (checkout_id,)).fetchone()
+
+    # Fallback usando externalReference: corrida-123
+    if not corrida:
+        referencia = str(
+            checkout.get("externalReference") or ""
+        ).strip()
+
+        if referencia.startswith("corrida-"):
+            try:
+                corrida_id = int(
+                    referencia.replace("corrida-", "", 1)
+                )
+                corrida = conn.execute("""
+                    SELECT id
+                    FROM corridas_vai
+                    WHERE id=?
+                    LIMIT 1
+                """, (corrida_id,)).fetchone()
+            except Exception:
+                corrida = None
+
+    if corrida:
+        if evento == "CHECKOUT_PAID":
+            conn.execute("""
+                UPDATE corridas_vai
+                SET pagamento_status='PAGO'
+                WHERE id=?
+            """, (corrida["id"],))
+
+        elif evento == "CHECKOUT_CANCELED":
+            conn.execute("""
+                UPDATE corridas_vai
+                SET pagamento_status='CANCELADO'
+                WHERE id=?
+            """, (corrida["id"],))
+
+        elif evento == "CHECKOUT_EXPIRED":
+            conn.execute("""
+                UPDATE corridas_vai
+                SET pagamento_status='EXPIRADO'
+                WHERE id=?
+            """, (corrida["id"],))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "evento": evento,
+        "checkout_id": checkout_id
+    }, 200
+
 
 @app.route("/service-worker.js")
 def service_worker():
