@@ -872,6 +872,26 @@ def dashboard():
     </div>
     """
 
+    html += """
+    <div class="card">
+        <h2>📡 Monitoramento</h2>
+        <p>Acompanhe motoristas, GPS e corridas aceitas.</p>
+        <a class="btn btn-azul"
+           href="/admin/monitoramento">
+            📍 ABRIR MONITORAMENTO
+        </a>
+    </div>
+
+    <div class="card">
+        <h2>💰 Solicitações de Saque</h2>
+        <p>Veja e aprove os saques dos motoristas.</p>
+        <a class="btn btn-azul"
+           href="/saques">
+            💰 ABRIR SAQUES
+        </a>
+    </div>
+    """
+
     return pagina(html)
 
 
@@ -4229,10 +4249,66 @@ a[href*="waze.com/ul"] {{
 </div>
 
 <div class="pub-card">
+    <a class="motor-btn verde" href="/motorista/saque">
+        💰 SOLICITAR SAQUE
+    </a>
+</div>
+
+<div class="pub-card">
     <a class="motor-btn azul" href="/motorista">
         🔄 ATUALIZAR CORRIDAS
     </a>
 </div>
+
+<!-- VAI_MOTO_GPS_HEARTBEAT -->
+<script>
+(function(){{
+
+    async function enviarGPSMotorista(){{
+
+        if(!navigator.geolocation){{
+            return;
+        }}
+
+        navigator.geolocation.getCurrentPosition(
+            async function(pos){{
+
+                try{{
+
+                    await fetch("/api/motorista/heartbeat", {{
+                        method:"POST",
+                        headers:{{
+                            "Content-Type":"application/json"
+                        }},
+                        credentials:"same-origin",
+                        body:JSON.stringify({{
+                            latitude:pos.coords.latitude,
+                            longitude:pos.coords.longitude
+                        }}),
+                        cache:"no-store"
+                    }});
+
+                }}catch(e){{}}
+
+            }},
+            function(e){{}},
+            {{
+                enableHighAccuracy:true,
+                timeout:10000,
+                maximumAge:5000
+            }}
+        );
+    }}
+
+    enviarGPSMotorista();
+
+    setInterval(
+        enviarGPSMotorista,
+        10000
+    );
+
+}})();
+</script>
 
 <meta http-equiv="refresh" content="5">
 """
@@ -5297,11 +5373,41 @@ def api_motorista_heartbeat():
     mid = _motorista_logado()
     if not mid:
         return {"ok": False}, 401
+
+    data = _json()
+
+    try:
+        latitude = float(data.get("latitude"))
+        longitude = float(data.get("longitude"))
+    except Exception:
+        latitude = None
+        longitude = None
+
     conn = conectar()
-    conn.execute("UPDATE motoqueiros SET conexao='online' WHERE id=? AND status='aprovado'", (mid,))
+
+    if latitude is not None and longitude is not None:
+        conn.execute("""
+            UPDATE motoqueiros
+            SET conexao='online',
+                latitude=?,
+                longitude=?
+            WHERE id=? AND status='aprovado'
+        """, (latitude, longitude, mid))
+    else:
+        conn.execute("""
+            UPDATE motoqueiros
+            SET conexao='online'
+            WHERE id=? AND status='aprovado'
+        """, (mid,))
+
     conn.commit()
     conn.close()
-    return {"ok": True}
+
+    return {
+        "ok": True,
+        "latitude": latitude,
+        "longitude": longitude
+    }
 
 
 @app.route("/api/corridas-disponiveis")
@@ -5448,6 +5554,761 @@ api_motoqueiro_status = api_motorista_status
 
 
 # ==============================
+
+# =========================================================
+# VAI_DE_MOTO - SISTEMA DE SAQUES
+# =========================================================
+
+def garantir_tabela_saques():
+    conn = conectar()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS saques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            motorista_id INTEGER NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            pix_chave TEXT NOT NULL DEFAULT '',
+            pix_tipo TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'PENDENTE',
+            observacao TEXT NOT NULL DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            pago_em TIMESTAMP,
+            FOREIGN KEY (motorista_id) REFERENCES motoqueiros(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+@app.route("/motorista/saque", methods=["GET", "POST"])
+def motorista_saque():
+    mid = _motorista_logado()
+
+    if not mid:
+        return redirect(url_for("login_motorista"))
+
+    garantir_tabela_saques()
+
+    conn = conectar()
+
+    motorista = conn.execute("""
+        SELECT id, nome, telefone, status
+        FROM motoqueiros
+        WHERE id=?
+    """, (mid,)).fetchone()
+
+    if not motorista:
+        conn.close()
+        return "Motorista não encontrado.", 404
+
+    ganhos = conn.execute("""
+        SELECT COALESCE(SUM(valor_motorista),0) AS total
+        FROM corridas_vai
+        WHERE motorista_id=?
+          AND status='CONCLUIDA'
+    """, (mid,)).fetchone()
+
+    saques = conn.execute("""
+        SELECT COALESCE(SUM(valor),0) AS total
+        FROM saques
+        WHERE motorista_id=?
+          AND status IN ('PENDENTE','PAGO')
+    """, (mid,)).fetchone()
+
+    saldo = round(
+        float(ganhos["total"] or 0) -
+        float(saques["total"] or 0),
+        2
+    )
+
+    if request.method == "POST":
+
+        try:
+            valor = round(float(
+                (request.form.get("valor") or "0")
+                .replace(",", ".")
+            ), 2)
+        except Exception:
+            valor = 0
+
+        pix_chave = (
+            request.form.get("pix_chave") or ""
+        ).strip()
+
+        pix_tipo = (
+            request.form.get("pix_tipo") or ""
+        ).strip().upper()
+
+        if valor <= 0:
+            conn.close()
+            return """
+            <script>
+            alert("Informe um valor válido.");
+            history.back();
+            </script>
+            """
+
+        if valor > saldo:
+            conn.close()
+            return """
+            <script>
+            alert("O valor solicitado é maior que seu saldo disponível.");
+            history.back();
+            </script>
+            """
+
+        if not pix_chave:
+            conn.close()
+            return """
+            <script>
+            alert("Informe sua chave PIX.");
+            history.back();
+            </script>
+            """
+
+        tipos_validos = ("CPF", "CNPJ", "EMAIL", "PHONE", "EVP")
+
+        if pix_tipo not in tipos_validos:
+            conn.close()
+            return """
+            <script>
+            alert("Selecione o tipo da chave PIX.");
+            history.back();
+            </script>
+            """
+
+        conn.execute("""
+            INSERT INTO saques
+            (motorista_id, valor, pix_chave, pix_tipo, status)
+            VALUES (?, ?, ?, ?, 'PENDENTE')
+        """, (
+            mid,
+            valor,
+            pix_chave,
+            pix_tipo
+        ))
+
+        conn.commit()
+        conn.close()
+
+        return redirect(url_for("motorista_saque"))
+
+    historico = conn.execute("""
+        SELECT id, valor, pix_chave, pix_tipo,
+               status, criado_em, pago_em, observacao
+        FROM saques
+        WHERE motorista_id=?
+        ORDER BY id DESC
+        LIMIT 30
+    """, (mid,)).fetchall()
+
+    conn.close()
+
+    import html
+
+    linhas = ""
+
+    for saque in historico:
+        status = html.escape(str(saque["status"] or ""))
+
+        linhas += f"""
+        <div style="
+            background:#181818;
+            border:1px solid #333;
+            border-radius:16px;
+            padding:16px;
+            margin:12px 0;
+        ">
+            <b>💰 SAQUE #{saque["id"]}</b><br>
+            Valor:
+            <strong>R$ {float(saque["valor"] or 0):.2f}</strong><br>
+            PIX:
+            {html.escape(str(saque["pix_chave"] or ""))}<br>
+            Tipo:
+            {html.escape(str(saque["pix_tipo"] or ""))}<br>
+            Status:
+            <strong>{status}</strong><br>
+            <small>{html.escape(str(saque["criado_em"] or ""))}</small>
+        </div>
+        """
+
+    if not linhas:
+        linhas = "<p>Nenhum saque solicitado.</p>"
+
+    corpo = f"""
+    <style>
+        body {{
+            background:#080808;
+            color:#fff;
+        }}
+
+        .saque-box {{
+            background:#111;
+            border:1px solid #333;
+            border-radius:20px;
+            padding:20px;
+            margin:15px 0;
+        }}
+
+        .saldo {{
+            font-size:38px;
+            font-weight:900;
+            text-align:center;
+            color:#43e56b;
+            margin:15px 0;
+        }}
+
+        .campo {{
+            width:100%;
+            box-sizing:border-box;
+            padding:15px;
+            margin:7px 0 15px;
+            border-radius:12px;
+            border:1px solid #555;
+            background:#222;
+            color:#fff;
+            font-size:18px;
+        }}
+
+        .botao {{
+            width:100%;
+            padding:17px;
+            border:0;
+            border-radius:14px;
+            font-size:19px;
+            font-weight:900;
+            cursor:pointer;
+        }}
+
+        .verde {{
+            background:#16833b;
+            color:#fff;
+        }}
+
+        .azul {{
+            background:#1769aa;
+            color:#fff;
+            text-decoration:none;
+            display:block;
+            text-align:center;
+            box-sizing:border-box;
+        }}
+    </style>
+
+    <div class="saque-box">
+        <h2>💰 Solicitar Saque</h2>
+
+        <p>Motorista: <b>{html.escape(str(motorista["nome"]))}</b></p>
+
+        <p>Saldo disponível:</p>
+
+        <div class="saldo">
+            R$ {saldo:.2f}
+        </div>
+
+        <form method="POST">
+
+            <label>Valor do saque</label>
+
+            <input
+                class="campo"
+                type="number"
+                name="valor"
+                min="0.01"
+                max="{saldo:.2f}"
+                step="0.01"
+                placeholder="Ex.: 50.00"
+                required
+            >
+
+            <label>Tipo da chave PIX</label>
+
+            <select class="campo" name="pix_tipo" required>
+                <option value="">Selecione</option>
+                <option value="CPF">CPF</option>
+                <option value="CNPJ">CNPJ</option>
+                <option value="EMAIL">E-mail</option>
+                <option value="PHONE">Telefone</option>
+                <option value="EVP">Chave aleatória</option>
+            </select>
+
+            <label>Chave PIX</label>
+
+            <input
+                class="campo"
+                type="text"
+                name="pix_chave"
+                placeholder="Digite sua chave PIX"
+                required
+            >
+
+            <button class="botao verde" type="submit">
+                💰 SOLICITAR SAQUE
+            </button>
+
+        </form>
+    </div>
+
+    <div class="saque-box">
+        <h2>📋 Meus Saques</h2>
+        {linhas}
+    </div>
+
+    <a class="botao azul" href="/motorista">
+        🏍️ VOLTAR AO PAINEL
+    </a>
+    """
+
+    return _pagina_publica(
+        "Solicitar Saque",
+        corpo,
+        manifesto="motorista"
+    )
+
+
+@app.route("/saques")
+@login_obrigatorio
+def admin_saques():
+
+    garantir_tabela_saques()
+
+    conn = conectar()
+
+    rows = conn.execute("""
+        SELECT
+            s.*,
+            m.nome AS motorista_nome,
+            m.telefone AS motorista_telefone
+        FROM saques s
+        LEFT JOIN motoqueiros m
+            ON m.id=s.motorista_id
+        ORDER BY
+            CASE WHEN s.status='PENDENTE' THEN 0 ELSE 1 END,
+            s.id DESC
+        LIMIT 100
+    """).fetchall()
+
+    conn.close()
+
+    import html
+
+    cards = ""
+
+    for s in rows:
+
+        status = str(s["status"] or "")
+
+        if status == "PAGO":
+            cor = "#16833b"
+        elif status == "CANCELADO":
+            cor = "#b00000"
+        else:
+            cor = "#d99a00"
+
+        botoes = ""
+
+        if status == "PENDENTE":
+            botoes = f"""
+            <form method="POST"
+                  action="/saques/status/{s["id"]}/PAGO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#16833b;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Confirmar saque como PAGO?')">
+                    ✅ MARCAR COMO PAGO
+                </button>
+            </form>
+
+            <form method="POST"
+                  action="/saques/status/{s["id"]}/CANCELADO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#b00000;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Cancelar este saque?')">
+                    ❌ CANCELAR SAQUE
+                </button>
+            </form>
+            """
+
+        cards += f"""
+        <div style="
+            background:#fff;
+            color:#111;
+            border-radius:16px;
+            padding:18px;
+            margin:15px 0;
+            border-left:8px solid {cor};
+        ">
+            <h3>💰 SAQUE #{s["id"]}</h3>
+
+            <b>🏍️ Motorista:</b>
+            {html.escape(str(s["motorista_nome"] or ""))}<br>
+
+            <b>📞 Telefone:</b>
+            {html.escape(str(s["motorista_telefone"] or ""))}<br>
+
+            <b>💵 Valor:</b>
+            R$ {float(s["valor"] or 0):.2f}<br>
+
+            <b>🔑 PIX:</b>
+            {html.escape(str(s["pix_chave"] or ""))}<br>
+
+            <b>Tipo:</b>
+            {html.escape(str(s["pix_tipo"] or ""))}<br>
+
+            <b>📌 Status:</b>
+            <strong>{html.escape(status)}</strong><br>
+
+            <small>{html.escape(str(s["criado_em"] or ""))}</small>
+
+            {botoes}
+        </div>
+        """
+
+    if not cards:
+        cards = "<p>Nenhuma solicitação de saque.</p>"
+
+    html_page = f"""
+    <!doctype html>
+    <html lang="pt-BR">
+    <head>
+        <meta name="viewport"
+              content="width=device-width,initial-scale=1">
+        <title>Saques - VAI_DE_MOTO</title>
+        <meta http-equiv="refresh" content="10">
+    </head>
+
+    <body style="
+        margin:0;
+        padding:20px;
+        background:#111;
+        color:#fff;
+        font-family:Arial,sans-serif;
+    ">
+
+        <h1>💰 Solicitações de Saque</h1>
+
+        {cards}
+
+        <a href="/"
+           style="
+             display:block;
+             background:#1769aa;
+             color:#fff;
+             padding:16px;
+             border-radius:12px;
+             text-align:center;
+             text-decoration:none;
+             font-weight:900;
+           ">
+            🏠 VOLTAR
+        </a>
+
+    </body>
+    </html>
+    """
+
+    return html_page
+
+
+@app.route("/saques/status/<int:id>/<status>", methods=["POST"])
+@login_obrigatorio
+def admin_saque_status(id, status):
+
+    status = status.upper()
+
+    if status not in ("PAGO", "CANCELADO"):
+        return "Status inválido.", 400
+
+    garantir_tabela_saques()
+
+    conn = conectar()
+
+    if status == "PAGO":
+        conn.execute("""
+            UPDATE saques
+            SET status='PAGO',
+                pago_em=CURRENT_TIMESTAMP
+            WHERE id=? AND status='PENDENTE'
+        """, (id,))
+    else:
+        conn.execute("""
+            UPDATE saques
+            SET status='CANCELADO'
+            WHERE id=? AND status='PENDENTE'
+        """, (id,))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("admin_saques"))
+
+
+# =========================================================
+# MONITORAMENTO ADMINISTRATIVO
+# =========================================================
+
+@app.route("/admin/monitoramento")
+@login_obrigatorio
+def admin_monitoramento():
+
+    conn = conectar()
+
+    motoristas = conn.execute("""
+        SELECT
+            id,
+            nome,
+            telefone,
+            status,
+            conexao,
+            latitude,
+            longitude
+        FROM motoqueiros
+        WHERE status='aprovado'
+        ORDER BY
+            CASE WHEN conexao='online' THEN 0 ELSE 1 END,
+            nome
+    """).fetchall()
+
+    corridas = conn.execute("""
+        SELECT
+            c.id,
+            c.origem,
+            c.destino,
+            c.valor,
+            c.status,
+            c.etapa,
+            c.criado_em,
+            c.motorista_id,
+            m.nome AS motorista_nome,
+            m.telefone AS motorista_telefone,
+            p.nome AS passageiro_nome,
+            p.telefone AS passageiro_telefone
+        FROM corridas_vai c
+        LEFT JOIN motoqueiros m
+            ON m.id=c.motorista_id
+        LEFT JOIN passageiros p
+            ON p.id=c.passageiro_id
+        WHERE c.status IN ('ACEITA','EM_ANDAMENTO')
+        ORDER BY c.id DESC
+        LIMIT 50
+    """).fetchall()
+
+    conn.close()
+
+    import html
+
+    lista_motoristas = ""
+
+    for m in motoristas:
+
+        lat = m["latitude"]
+        lon = m["longitude"]
+
+        if lat is not None and lon is not None:
+
+            maps = (
+                f"https://www.google.com/maps?q="
+                f"{lat},{lon}"
+            )
+
+            waze = (
+                f"https://waze.com/ul?"
+                f"ll={lat}%2C{lon}&navigate=yes"
+            )
+
+            local = f"""
+            <b>📍 GPS:</b>
+            {float(lat):.6f}, {float(lon):.6f}
+
+            <a href="{maps}"
+               target="_blank"
+               style="
+                 display:block;
+                 margin-top:10px;
+                 padding:12px;
+                 background:#1769aa;
+                 color:#fff;
+                 border-radius:10px;
+                 text-decoration:none;
+                 text-align:center;
+                 font-weight:900;
+               ">
+                🗺️ ABRIR GOOGLE MAPS
+            </a>
+
+            <a href="{waze}"
+               target="_blank"
+               style="
+                 display:block;
+                 margin-top:8px;
+                 padding:12px;
+                 background:#222;
+                 color:#fff;
+                 border-radius:10px;
+                 text-decoration:none;
+                 text-align:center;
+                 font-weight:900;
+               ">
+                🚗 ABRIR WAZE
+            </a>
+            """
+
+        else:
+            local = "<b>📍 GPS:</b> aguardando localização..."
+
+        cor = "#16833b" if m["conexao"] == "online" else "#777"
+
+        lista_motoristas += f"""
+        <div style="
+            background:#fff;
+            color:#111;
+            border-radius:16px;
+            padding:18px;
+            margin:12px 0;
+            border-left:8px solid {cor};
+        ">
+
+            <h3>
+                🏍️ {html.escape(str(m["nome"] or ""))}
+            </h3>
+
+            <b>📞 Telefone:</b>
+            {html.escape(str(m["telefone"] or ""))}<br>
+
+            <b>📡 Conexão:</b>
+            {html.escape(str(m["conexao"] or "offline"))}<br>
+
+            {local}
+
+        </div>
+        """
+
+    if not lista_motoristas:
+        lista_motoristas = "<p>Nenhum motorista cadastrado.</p>"
+
+    lista_corridas = ""
+
+    for c in corridas:
+
+        lista_corridas += f"""
+        <div style="
+            background:#fff;
+            color:#111;
+            border-radius:16px;
+            padding:18px;
+            margin:12px 0;
+            border-left:8px solid #1769aa;
+        ">
+
+            <h3>🚕 CORRIDA #{c["id"]}</h3>
+
+            <b>📌 Status:</b>
+            {html.escape(str(c["status"] or ""))}<br>
+
+            <b>🚦 Etapa:</b>
+            {html.escape(str(c["etapa"] or ""))}<br>
+
+            <b>🏍️ Motorista:</b>
+            {html.escape(str(c["motorista_nome"] or "Não informado"))}<br>
+
+            <b>👤 Passageiro:</b>
+            {html.escape(str(c["passageiro_nome"] or ""))}<br>
+
+            <b>📍 Origem:</b><br>
+            {html.escape(str(c["origem"] or ""))}<br><br>
+
+            <b>🏁 Destino:</b><br>
+            {html.escape(str(c["destino"] or ""))}<br><br>
+
+            <b>💰 Valor:</b>
+            R$ {float(c["valor"] or 0):.2f}
+
+        </div>
+        """
+
+    if not lista_corridas:
+        lista_corridas = "<p>Nenhuma corrida aceita ou em andamento.</p>"
+
+    pagina_monitoramento = f"""
+    <!doctype html>
+    <html lang="pt-BR">
+
+    <head>
+        <meta name="viewport"
+              content="width=device-width,initial-scale=1">
+
+        <title>Monitoramento - VAI_DE_MOTO</title>
+
+        <meta http-equiv="refresh" content="5">
+    </head>
+
+    <body style="
+        margin:0;
+        padding:18px;
+        background:#111;
+        color:#fff;
+        font-family:Arial,sans-serif;
+    ">
+
+        <h1>📡 MONITORAMENTO</h1>
+
+        <div style="
+            background:#1769aa;
+            padding:16px;
+            border-radius:15px;
+            margin-bottom:20px;
+        ">
+            Atualização automática a cada 5 segundos.
+        </div>
+
+        <h2>🏍️ MOTORISTAS</h2>
+
+        {lista_motoristas}
+
+        <h2>🚕 CORRIDAS ACEITAS</h2>
+
+        {lista_corridas}
+
+        <a href="/"
+           style="
+             display:block;
+             background:#16833b;
+             color:#fff;
+             padding:16px;
+             border-radius:12px;
+             text-align:center;
+             text-decoration:none;
+             font-weight:900;
+             margin-top:20px;
+           ">
+            🏠 VOLTAR AO ADMIN
+        </a>
+
+    </body>
+    </html>
+    """
+
+    return pagina_monitoramento
+
+
 # PWA VAI_DE_MOTO
 # ==============================
 
