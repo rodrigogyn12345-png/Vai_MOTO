@@ -95,7 +95,19 @@ def criar_checkout_asaas(corrida_id, valor, origem, destino):
         return checkout_id, checkout_url, None
 
     except Exception as e:
-        return None, None, f"Erro ao criar Checkout Asaas: {e}"
+        detalhe = str(e)
+
+        try:
+            from urllib.error import HTTPError
+
+            if isinstance(e, HTTPError):
+                corpo = e.read().decode("utf-8", errors="replace").strip()
+                if corpo:
+                    detalhe = f"HTTP {e.code}: {corpo}"
+        except Exception:
+            pass
+
+        return None, None, f"Erro ao criar Checkout Asaas: {detalhe}"
 
 
 def iniciar_banco():
