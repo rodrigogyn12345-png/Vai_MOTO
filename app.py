@@ -27,7 +27,7 @@ LIMITE_MOTOQUEIROS = 20
 ASAAS_API_KEY = os.getenv("ASAAS_API_KEY", "").strip()
 ASAAS_BASE_URL = os.getenv(
     "ASAAS_BASE_URL",
-    "https://api-sandbox.asaas.com/v3"
+    "https://api.asaas.com/v3"
 ).rstrip("/")
 
 ASAAS_WEBHOOK_TOKEN = os.getenv(
