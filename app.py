@@ -3259,39 +3259,484 @@ async function solicitar(){
 
   carregarCorridas();
 }
-async function carregarCorridas(){
-  const r=await fetch("/api/minhas-corridas"); const d=await r.json();
-  const box=document.getElementById("lista-corridas");
-  if(!d.ok){box.innerHTML="Faça login novamente.";return;}
-  if(!d.corridas.length){box.innerHTML="Nenhuma corrida ainda.";return;}
-  box.innerHTML=d.corridas.map(c=>`
-    <div class="pub-info">
-      <b>🚕 Corrida #${c.id}</b><br>
-      📍 ${c.origem}<br>
-      🏁 ${c.destino}<br>
-      💰 R$ ${Number(c.valor).toFixed(2)}<br>
-      📌 ${c.status}<br>
-      🏍️ ${c.motorista_nome||"Aguardando motorista"}
+  async function carregarCorridas(){
+    try{
+      const r = await fetch("/api/minhas-corridas", {
+        cache:"no-store",
+        credentials:"same-origin"
+      });
 
-      ${
-        (c.status === "PENDENTE" || c.status === "ACEITA")
-        ? `
-          <br><br>
-          <button
-            type="button"
-            class="pub-btn"
-            style="background:#b00000;color:#fff;font-weight:900;"
-            onclick="cancelarCorrida(${c.id})">
-            🔴 CANCELAR CORRIDA
-          </button>
-        `
-        : ""
+      const d = await r.json();
+      const box = document.getElementById("lista-corridas");
+
+      if(!d.ok){
+        box.innerHTML = `
+          <div style="padding:18px;text-align:center">
+            🔐 Faça login novamente.
+          </div>`;
+        return;
       }
-    </div>
-  `).join("");
+
+      if(!Array.isArray(d.corridas) || !d.corridas.length){
+        box.innerHTML = `
+          <div style="padding:22px;text-align:center;color:#777">
+            <div style="font-size:38px">🏍️</div>
+            <div style="font-weight:800;margin-top:8px">
+              Nenhuma corrida ainda.
+            </div>
+            <div style="font-size:13px;margin-top:5px">
+              Solicite sua primeira corrida acima.
+            </div>
+          </div>`;
+        return;
+      }
+
+      function statusInfo(c){
+        const status = String(c.status || "").toUpperCase();
+        const etapa = String(c.etapa || "").toUpperCase();
+
+        if(status === "PENDENTE"){
+          return {
+            titulo:"PROCURANDO MOTORISTA",
+            texto:"Estamos procurando um motorista disponível.",
+            emoji:"🔎",
+            progresso:20
+          };
+        }
+
+        if(status === "ACEITA" && etapa === "CHEGOU"){
+          return {
+            titulo:"MOTORISTA CHEGOU",
+            texto:"Seu motorista está aguardando você.",
+            emoji:"📍",
+            progresso:60
+          };
+        }
+
+        if(status === "ACEITA"){
+          return {
+            titulo:"MOTORISTA A CAMINHO",
+            texto:"Seu motorista aceitou a corrida e está indo até você.",
+            emoji:"🏍️",
+            progresso:40
+          };
+        }
+
+        if(status === "EM_ANDAMENTO"){
+          return {
+            titulo:"CORRIDA EM ANDAMENTO",
+            texto:"Você está a caminho do destino.",
+            emoji:"🚀",
+            progresso:80
+          };
+        }
+
+        if(status === "CONCLUIDA"){
+          return {
+            titulo:"CORRIDA CONCLUÍDA",
+            texto:"Sua corrida foi finalizada.",
+            emoji:"✅",
+            progresso:100
+          };
+        }
+
+        if(status === "CANCELADA"){
+          return {
+            titulo:"CORRIDA CANCELADA",
+            texto:"Esta corrida foi cancelada.",
+            emoji:"❌",
+            progresso:0
+          };
+        }
+
+        return {
+          titulo:status || "CORRIDA",
+          texto:"Acompanhando sua corrida.",
+          emoji:"🏍️",
+          progresso:10
+        };
+      }
+
+      function telefoneMotorista(telefone){
+        if(!telefone) return "";
+
+        const numero = String(telefone).replace(/[^\d+]/g,"");
+
+        return `
+          <a href="tel:${numero}"
+             style="
+               display:inline-flex;
+               align-items:center;
+               justify-content:center;
+               gap:7px;
+               margin-top:10px;
+               padding:11px 15px;
+               border-radius:13px;
+               background:#087f23;
+               color:white;
+               text-decoration:none;
+               font-weight:900;
+               font-size:14px;
+             ">
+             📞 LIGAR PARA O MOTORISTA
+          </a>`;
+      }
+
+      function mapaLink(c){
+        const origem = encodeURIComponent(c.origem || "");
+        const destino = encodeURIComponent(c.destino || "");
+
+        if(!origem && !destino) return "";
+
+        return `
+          <a
+            href="https://www.google.com/maps/dir/?api=1&origin=${origem}&destination=${destino}"
+            target="_blank"
+            rel="noopener"
+            style="
+              display:inline-flex;
+              align-items:center;
+              justify-content:center;
+              gap:7px;
+              margin-top:10px;
+              padding:11px 15px;
+              border-radius:13px;
+              background:#222;
+              color:white;
+              text-decoration:none;
+              font-weight:900;
+              font-size:14px;
+            ">
+            🗺️ VER ROTA NO GOOGLE MAPS
+          </a>`;
+      }
+
+      function cardAtiva(c){
+        const st = statusInfo(c);
+        const motorista = c.motorista_nome || "Aguardando motorista";
+
+        return `
+          <div style="
+            background:#fff;
+            color:#111;
+            border-radius:22px;
+            padding:18px;
+            margin-bottom:16px;
+            box-shadow:0 8px 28px rgba(0,0,0,.14);
+            border:1px solid #eee;
+          ">
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              align-items:center;
+              gap:10px;
+              margin-bottom:13px;
+            ">
+              <div style="font-size:12px;color:#777;font-weight:800">
+                CORRIDA #${c.id}
+              </div>
+
+              <div style="
+                background:#f3f3f3;
+                border-radius:20px;
+                padding:6px 10px;
+                font-size:11px;
+                font-weight:900;
+              ">
+                ${c.pagamento || "DINHEIRO"}
+              </div>
+            </div>
+
+            <div style="
+              text-align:center;
+              padding:13px 8px;
+              border-radius:17px;
+              background:#f7f7f7;
+            ">
+              <div style="font-size:32px">${st.emoji}</div>
+
+              <div style="
+                font-size:18px;
+                font-weight:900;
+                margin-top:5px;
+              ">
+                ${st.titulo}
+              </div>
+
+              <div style="
+                font-size:13px;
+                color:#666;
+                margin-top:6px;
+                line-height:1.35;
+              ">
+                ${st.texto}
+              </div>
+            </div>
+
+            <div style="margin:17px 2px 12px">
+              <div style="
+                height:9px;
+                border-radius:20px;
+                background:#e5e5e5;
+                overflow:hidden;
+              ">
+                <div style="
+                  width:${st.progresso}%;
+                  height:100%;
+                  border-radius:20px;
+                  background:#087f23;
+                  transition:width .4s ease;
+                "></div>
+              </div>
+
+              <div style="
+                display:flex;
+                justify-content:space-between;
+                font-size:10px;
+                color:#888;
+                margin-top:6px;
+                font-weight:700;
+              ">
+                <span>Solicitada</span>
+                <span>Motorista</span>
+                <span>Chegou</span>
+                <span>Em viagem</span>
+                <span>Finalizada</span>
+              </div>
+            </div>
+
+            <div style="
+              border-top:1px solid #eee;
+              padding-top:14px;
+              margin-top:8px;
+            ">
+
+              <div style="
+                font-size:12px;
+                color:#777;
+                font-weight:800;
+                margin-bottom:5px;
+              ">
+                MOTORISTA
+              </div>
+
+              <div style="
+                display:flex;
+                align-items:center;
+                gap:10px;
+              ">
+                <div style="
+                  width:44px;
+                  height:44px;
+                  border-radius:50%;
+                  background:#111;
+                  color:#ff8a00;
+                  display:flex;
+                  align-items:center;
+                  justify-content:center;
+                  font-size:22px;
+                ">
+                  🏍️
+                </div>
+
+                <div>
+                  <div style="font-weight:900;font-size:16px">
+                    ${motorista}
+                  </div>
+
+                  <div style="font-size:12px;color:#777;margin-top:2px">
+                    ${c.motorista_telefone || "Aguardando motorista"}
+                  </div>
+                </div>
+              </div>
+
+              ${telefoneMotorista(c.motorista_telefone)}
+
+              <div style="
+                margin-top:15px;
+                padding:13px;
+                border-radius:15px;
+                background:#f7f7f7;
+                font-size:13px;
+                line-height:1.5;
+              ">
+                <div>
+                  📍 <b>Origem:</b><br>
+                  ${c.origem || "-"}
+                </div>
+
+                <div style="
+                  border-left:2px solid #ccc;
+                  margin:6px 0 6px 7px;
+                  height:12px;
+                "></div>
+
+                <div>
+                  🏁 <b>Destino:</b><br>
+                  ${c.destino || "-"}
+                </div>
+              </div>
+
+              <div style="
+                display:flex;
+                justify-content:space-between;
+                align-items:center;
+                margin-top:15px;
+                padding-top:13px;
+                border-top:1px solid #eee;
+              ">
+                <span style="font-size:13px;color:#777">
+                  Valor da corrida
+                </span>
+
+                <strong style="font-size:21px">
+                  R$ ${Number(c.valor || 0).toFixed(2)}
+                </strong>
+              </div>
+
+              ${mapaLink(c)}
+
+              ${
+                (c.status === "PENDENTE" || c.status === "ACEITA")
+                ? `
+                  <button
+                    type="button"
+                    onclick="cancelarCorrida(${c.id})"
+                    style="
+                      width:100%;
+                      margin-top:12px;
+                      padding:13px;
+                      border:0;
+                      border-radius:14px;
+                      background:#f1f1f1;
+                      color:#b00020;
+                      font-weight:900;
+                      cursor:pointer;
+                    ">
+                    🔴 CANCELAR CORRIDA
+                  </button>
+                `
+                : ""
+              }
+
+            </div>
+          </div>
+        `;
+      }
+
+      function cardHistorico(c){
+        const st = statusInfo(c);
+
+        return `
+          <div style="
+            background:#fff;
+            color:#111;
+            border-radius:18px;
+            padding:15px;
+            margin-bottom:10px;
+            border:1px solid #eee;
+          ">
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              gap:10px;
+            ">
+              <strong>🏍️ Corrida #${c.id}</strong>
+
+              <span style="
+                font-size:11px;
+                font-weight:900;
+                color:#666;
+              ">
+                ${st.emoji} ${st.titulo}
+              </span>
+            </div>
+
+            <div style="
+              margin-top:9px;
+              font-size:12px;
+              color:#666;
+              line-height:1.5;
+            ">
+              📍 ${c.origem || "-"}<br>
+              🏁 ${c.destino || "-"}
+            </div>
+
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              margin-top:10px;
+              padding-top:10px;
+              border-top:1px solid #eee;
+            ">
+              <span style="font-size:12px;color:#777">
+                ${c.motorista_nome || "Sem motorista"}
+              </span>
+
+              <strong>
+                R$ ${Number(c.valor || 0).toFixed(2)}
+              </strong>
+            </div>
+          </div>
+        `;
+      }
+
+      const ativas = d.corridas.filter(c =>
+        ["PENDENTE","ACEITA","EM_ANDAMENTO"].includes(
+          String(c.status || "").toUpperCase()
+        )
+      );
+
+      const historico = d.corridas.filter(c =>
+        !["PENDENTE","ACEITA","EM_ANDAMENTO"].includes(
+          String(c.status || "").toUpperCase()
+        )
+      );
+
+      let html = "";
+
+      if(ativas.length){
+        html += `
+          <div style="
+            font-size:13px;
+            font-weight:900;
+            color:#555;
+            margin-bottom:8px;
+            text-transform:uppercase;
+          ">
+            🚦 Acompanhamento atual
+          </div>
+        `;
+
+        html += cardAtiva(ativas[0]);
+      }
+
+      if(historico.length){
+        html += `
+          <div style="
+            font-size:13px;
+            font-weight:900;
+            color:#555;
+            margin:18px 0 8px;
+            text-transform:uppercase;
+          ">
+            🧾 Histórico de corridas
+          </div>
+        `;
+
+        html += historico.map(cardHistorico).join("");
+      }
+
+      box.innerHTML = html;
+
+    }catch(e){
+      console.log("Erro ao carregar corridas:", e);
+    }
+  }
 
   window.cancelarCorrida = async function(id){
-    if(!confirm("Tem certeza que deseja cancelar esta corrida?")){
+    if(!confirm("Deseja realmente cancelar esta corrida?")){
       return;
     }
 
@@ -3304,48 +3749,26 @@ async function carregarCorridas(){
         }
       );
 
-      const textoResposta = await r.text();
-
-      let d;
-      try{
-        d = JSON.parse(textoResposta);
-      }catch(e){
-        console.log("RESPOSTA DO SERVIDOR:", textoResposta);
-        toast("Erro no servidor. HTTP " + r.status);
-        if(botao){
-          botao.disabled = false;
-          botao.textContent = "🟢 ACEITAR CORRIDA";
-          botao.style.opacity = "1";
-        }
-        return;
-      }
-
-      if(!r.ok){
-        console.log("HTTP:", r.status, d);
-        toast(d.erro || ("Erro HTTP " + r.status));
-        if(botao){
-          botao.disabled = false;
-          botao.textContent = "🟢 ACEITAR CORRIDA";
-          botao.style.opacity = "1";
-        }
-        return;
-      }
+      const d = await r.json();
 
       if(!d.ok){
-        msg(d.erro || "Não foi possível cancelar a corrida.","erro");
+        alert(d.erro || "Não foi possível cancelar.");
         return;
       }
 
-      msg("Corrida cancelada com sucesso.","sucesso");
-
-      carregarCorridas();
+      await carregarCorridas();
 
     }catch(e){
-      msg("Erro ao cancelar a corrida.","erro");
+      alert("Erro de conexão.");
     }
-  }
-}
-carregarCorridas();
+  };
+
+  carregarCorridas();
+
+  /* Atualiza o acompanhamento automaticamente */
+  setInterval(function(){
+    carregarCorridas();
+  }, 4000);
 
 /* ===== NOTIFICAÇÃO: MOTORISTA CHEGOU ===== */
 (function(){
