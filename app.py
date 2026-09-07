@@ -6400,7 +6400,6 @@ def alerta_sonoro_motorista(response):
       /* Atualizações secundárias em segundo plano */
       try{ await minhas(); }catch(e){}
       try{ await ganhos(); }catch(e){}
-      try{ await carregar(); }catch(e){}
 
     }catch(e){
       console.log("ERRO NO ACEITE:", e);
