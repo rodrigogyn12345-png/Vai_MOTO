@@ -3143,6 +3143,7 @@ async function usarMinhaLocalizacao(){
         <select id="pagamento" class="pub-input">
           <option value="DINHEIRO">💵 Dinheiro</option>
           <option value="PIX">🔑 PIX</option>
+          <option value="CARTAO">💳 Cartão</option>
         </select>
 
         <button class="pub-btn pub-green" type="button" onclick="calcular()">💰 CALCULAR CORRIDA</button>
@@ -3295,10 +3296,19 @@ async function solicitar(){
         const status = String(c.status || "").toUpperCase();
         const etapa = String(c.etapa || "").toUpperCase();
 
+        if(status === "AGUARDANDO_PAGAMENTO"){
+          return {
+            titulo:"AGUARDANDO PAGAMENTO",
+            texto:"Finalize o pagamento para liberarmos a chamada do motorista.",
+            emoji:"💳",
+            progresso:10
+          };
+        }
+
         if(status === "PENDENTE"){
           return {
             titulo:"PROCURANDO MOTORISTA",
-            texto:"Estamos procurando um motorista disponível.",
+            texto:"Pagamento confirmado. Estamos procurando um motorista disponível.",
             emoji:"🔎",
             progresso:20
           };
@@ -5295,21 +5305,29 @@ def api_solicitar_corrida():
 
     if not origem or not destino or distancia <= 0 or valor <= 0:
         return {"ok": False, "erro": "Origem, destino e valor são obrigatórios."}
-    if pagamento not in ("DINHEIRO", "PIX"):
+    if pagamento not in ("DINHEIRO", "PIX", "CARTAO"):
         pagamento = "DINHEIRO"
 
     taxa = round(valor * TAXA_APP, 2)
     valor_motorista = round(valor - taxa, 2)
-    pagamento_status = "PENDENTE" if pagamento == "PIX" else "NAO_APLICAVEL"
+
+    # Dinheiro chama o motorista imediatamente.
+    # PIX/cartão só liberam a corrida depois da confirmação do pagamento.
+    if pagamento == "DINHEIRO":
+        status_corrida = "PENDENTE"
+        pagamento_status = "NAO_APLICAVEL"
+    else:
+        status_corrida = "AGUARDANDO_PAGAMENTO"
+        pagamento_status = "AGUARDANDO_PAGAMENTO"
 
     conn = conectar()
     cur = conn.execute("""
         INSERT INTO corridas_vai
         (passageiro_id, motorista_id, origem, destino, valor, status, observacao,
          pagamento, pagamento_status, pix_chave, distancia_km, taxa_app, valor_motorista)
-        VALUES (?, NULL, ?, ?, ?, 'PENDENTE', '', ?, ?, ?, ?, ?, ?)
-    """, (pid, origem, destino, valor, pagamento, pagamento_status, PIX_ADMIN,
-          distancia, taxa, valor_motorista))
+        VALUES (?, NULL, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
+    """, (pid, origem, destino, valor, status_corrida, pagamento,
+          pagamento_status, PIX_ADMIN, distancia, taxa, valor_motorista))
     conn.commit()
     corrida_id = cur.lastrowid
     conn.close()
@@ -5319,7 +5337,7 @@ def api_solicitar_corrida():
     # =========================================================
     checkout_url = ""
 
-    if pagamento == "PIX":
+    if pagamento in ("PIX", "CARTAO"):
         checkout_id, checkout_url, erro_asaas = criar_checkout_asaas(
             corrida_id,
             valor,
@@ -5395,7 +5413,7 @@ def api_cancelar_corrida(id):
     conn = conectar()
     cur = conn.execute("""
         UPDATE corridas_vai SET status='CANCELADA', cancelado_em=CURRENT_TIMESTAMP
-        WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','ACEITA')
+        WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','AGUARDANDO_PAGAMENTO','ACEITA')
     """, (id, pid))
     conn.commit()
     conn.close()
@@ -5493,7 +5511,9 @@ def api_corridas_disponiveis():
     rows = conn.execute("""
         SELECT c.id,c.origem,c.destino,c.valor,c.status,c.pagamento,c.distancia_km,c.criado_em
         FROM corridas_vai c
-        WHERE c.status='PENDENTE' AND c.motorista_id IS NULL
+        WHERE c.status='PENDENTE'
+          AND c.motorista_id IS NULL
+          AND c.pagamento_status IN ('NAO_APLICAVEL','PAGO')
         ORDER BY c.id DESC LIMIT 20
     """).fetchall()
     conn.close()
@@ -6476,10 +6496,15 @@ def asaas_webhook():
 
     if corrida:
         if evento == "CHECKOUT_PAID":
+            # Pagamento confirmado pelo Asaas:
+            # libera a corrida para os motoristas.
             conn.execute("""
                 UPDATE corridas_vai
-                SET pagamento_status='PAGO'
+                SET pagamento_status='PAGO',
+                    status='PENDENTE'
                 WHERE id=?
+                  AND pagamento IN ('PIX','CARTAO')
+                  AND status='AGUARDANDO_PAGAMENTO'
             """, (corrida["id"],))
 
         elif evento == "CHECKOUT_CANCELED":
