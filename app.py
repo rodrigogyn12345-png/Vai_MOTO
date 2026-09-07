@@ -6189,7 +6189,7 @@ def alerta_sonoro_motorista(response):
     }catch(e){}
   }
 
-  function iniciarContagemCorrida(){
+  function iniciarContagemCorrida(id){
     const antigo = document.getElementById("contador-nova-corrida");
     if(antigo) antigo.remove();
 
@@ -6209,7 +6209,12 @@ def alerta_sonoro_motorista(response):
       '<div style="font-size:26px">🚨 NOVA CORRIDA!</div>' +
       '<div style="font-size:20px;margin-top:5px">ACEITE A CORRIDA</div>' +
       '<div id="numero-contador-corrida" style="font-size:64px;line-height:1;margin:8px">9</div>' +
-      '<div style="font-size:18px">SEGUNDOS</div>';
+      '<div style="font-size:18px">SEGUNDOS</div>' +
+      '<button id="btn-aceitar-popup" ' +
+      'style="margin-top:14px;width:100%;padding:16px;border:0;border-radius:12px;' +
+      'background:#16a34a;color:white;font-size:20px;font-weight:900;" ' +
+      'onclick="aceitarCorridaPopup('+id+')">' +
+      '🟢 ACEITAR CORRIDA</button>';
 
     document.body.appendChild(painel);
 
@@ -6231,6 +6236,11 @@ def alerta_sonoro_motorista(response):
           texto.textContent = "⏰ TEMPO ENCERRADO";
         }
 
+        const botao = document.getElementById("btn-aceitar-popup");
+        if(botao){
+          botao.remove();
+        }
+
         setTimeout(function(){
           if(painel.parentNode){
             painel.remove();
@@ -6238,6 +6248,60 @@ def alerta_sonoro_motorista(response):
         }, 2500);
       }
     }, 1000);
+  }
+
+  async function aceitarCorridaPopup(id){
+    const botao = document.getElementById("btn-aceitar-popup");
+
+    if(botao){
+      botao.disabled = true;
+      botao.textContent = "⏳ ACEITANDO...";
+      botao.style.opacity = "0.7";
+    }
+
+    try{
+      const r = await fetch(
+        "/api/corrida/"+id+"/aceitar",
+        {
+          method:"POST",
+          credentials:"same-origin"
+        }
+      );
+
+      const d = await r.json();
+
+      if(!d.ok){
+        toast(d.erro || "Não foi possível aceitar a corrida.");
+
+        if(botao){
+          botao.disabled = false;
+          botao.textContent = "🟢 ACEITAR CORRIDA";
+          botao.style.opacity = "1";
+        }
+
+        return;
+      }
+
+      const painel = document.getElementById("contador-nova-corrida");
+      if(painel) painel.remove();
+
+      clearInterval(window._contadorNovaCorrida);
+
+      toast("🟢 CORRIDA ACEITA!");
+
+      await minhas();
+      await ganhos();
+      carregar();
+
+    }catch(e){
+      toast("Erro de conexão ao aceitar a corrida.");
+
+      if(botao){
+        botao.disabled = false;
+        botao.textContent = "🟢 ACEITAR CORRIDA";
+        botao.style.opacity = "1";
+      }
+    }
   }
 
   async function verificarCorridas(){
@@ -6263,7 +6327,15 @@ def alerta_sonoro_motorista(response):
 
       if(quantidade > ultimaQuantidade){
         tocarChamada();
-        iniciarContagemCorrida();
+
+        const novaCorrida =
+          Array.isArray(d.corridas) && d.corridas.length
+            ? d.corridas[0]
+            : null;
+
+        if(novaCorrida && novaCorrida.id){
+          iniciarContagemCorrida(novaCorrida.id);
+        }
       }
 
       if(quantidade === 0){
