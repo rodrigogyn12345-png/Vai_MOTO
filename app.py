@@ -17,7 +17,7 @@ app = Flask(__name__)
 app.secret_key = "VAI_DE_MOTO_CHAVE_TROCAR_DEPOIS"
 app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
 
-DB = "vai_de_moto.db"
+DB = "/var/data/vai_de_moto.db"
 LIMITE_MOTOQUEIROS = 20
 
 # =========================================================
