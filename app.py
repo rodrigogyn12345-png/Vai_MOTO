@@ -6350,21 +6350,15 @@ def alerta_sonoro_motorista(response):
         cache:"no-store"
       });
 
-      const texto=await r.text();
-      let d;
+      const d=await r.json();
 
-      try{
-        d=JSON.parse(texto);
-      }catch(e){
-        console.log("RESPOSTA ACEITE:",texto);
-        throw new Error("Servidor retornou resposta inválida HTTP "+r.status);
-      }
-
-      console.log("ACEITE:",d);
+      console.log("RESPOSTA DO ACEITE:",d);
 
       if(!r.ok || !d.ok){
-        throw new Error(d.erro || ("Erro HTTP "+r.status));
+        throw new Error(d.erro || "Não foi possível aceitar a corrida.");
       }
+
+      window._corridaEmFluxo=true;
 
       const painel=document.getElementById("contador-nova-corrida");
       if(painel) painel.remove();
@@ -6372,95 +6366,63 @@ def alerta_sonoro_motorista(response):
       clearInterval(window._contadorNovaCorrida);
 
       toast("🟢 CORRIDA ACEITA!");
-      window._corridaEmFluxo=true;
 
-      /*
-       * IMPORTANTE:
-       * mostra a corrida aceita imediatamente.
-       */
       let corrida=d.corrida || null;
 
-      /*
-       * Se o servidor não devolver a corrida completa,
-       * busca novamente pelo endpoint das corridas do motorista.
-       */
       if(!corrida){
-        try{
-          const rr=await fetch("/api/motorista/minhas-corridas",{
-            cache:"no-store",
-            credentials:"same-origin"
-          });
+        const rr=await fetch("/api/motorista/minhas-corridas",{
+          method:"GET",
+          credentials:"same-origin",
+          cache:"no-store"
+        });
 
-          const mm=await rr.json();
+        const mm=await rr.json();
 
-          if(mm.ok && Array.isArray(mm.corridas)){
-            corrida=mm.corridas.find(x=>String(x.id)===String(id)) || null;
-          }
-        }catch(e){
-          console.log("Erro buscando corrida aceita:",e);
+        console.log("MINHAS APÓS ACEITE:",mm);
+
+        if(mm.ok && Array.isArray(mm.corridas)){
+          corrida=mm.corridas.find(
+            x=>String(x.id)===String(id)
+          ) || null;
         }
       }
 
-      if(corrida){
-        console.log("CORRIDA ACEITA ENCONTRADA:",corrida);
-
-        window._minhas=window._minhas || [];
-
-        window._minhas=[
-          corrida,
-          ...window._minhas.filter(x=>String(x.id)!==String(corrida.id))
-        ];
-
-        /*
-         * Não depende de currentView.
-         * A corrida aceita SEMPRE aparece na tela.
-         */
-        renderPedidos([], [corrida]);
-
-      }else{
-        console.log("ATENÇÃO: corrida aceita não encontrada após aceite:",id);
-
-        toast("⚠️ Corrida aceita, atualizando tela...");
-
-        /*
-         * Última tentativa.
-         */
-        setTimeout(async function(){
-          try{
-            const rr=await fetch("/api/motorista/minhas-corridas",{
-              cache:"no-store",
-              credentials:"same-origin"
-            });
-
-            const mm=await rr.json();
-
-            if(mm.ok && Array.isArray(mm.corridas)){
-              const c=mm.corridas.find(x=>String(x.id)===String(id));
-
-              if(c){
-                window._minhas=mm.corridas;
-                renderPedidos([], [c]);
-              }
-            }
-          }catch(e){
-            console.log("Última tentativa falhou:",e);
-          }
-        },1000);
+      if(!corrida){
+        throw new Error("Corrida aceita, mas não foi encontrada na lista do motorista.");
       }
 
+      corrida.status="ACEITA";
+
+      window._minhas=window._minhas || [];
+      window._minhas=[
+        corrida,
+        ...window._minhas.filter(
+          x=>String(x.id)!==String(corrida.id)
+        )
+      ];
+
+      console.log("DESENHANDO CORRIDA ACEITA:",corrida);
+
       /*
-       * Ganhos é secundário.
-       * Não deixamos nenhum erro dele esconder a corrida.
+       * FORÇA A CORRIDA ACEITA NA TELA.
+       * Não chama carregar() aqui.
+       */
+      renderPedidos([], [corrida]);
+
+      /*
+       * Atualiza somente os valores de ganhos.
        */
       try{
         await ganhos();
       }catch(e){
-        console.log("Erro atualizando ganhos:",e);
+        console.log("Erro ao atualizar ganhos:",e);
       }
 
     }catch(e){
       console.log("ERRO NO ACEITE:",e);
       toast("❌ "+(e.message || "Erro ao aceitar corrida."));
+
+      window._corridaEmFluxo=false;
 
       if(botao){
         botao.disabled=false;
