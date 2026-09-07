@@ -3937,7 +3937,14 @@ async function ganhos(){
 function renderGanhos(d){document.getElementById('lista').innerHTML='<div class="ride-card"><div class="ride-row"><div><div class="ride-muted">GANHOS DE HOJE</div><div style="font-size:32px;font-weight:900;margin-top:4px">'+br(d.total_hoje)+'</div></div><div style="text-align:right"><div class="ride-muted">CORRIDAS</div><div style="font-size:25px;font-weight:900">'+d.corridas_hoje+'</div></div></div><div style="margin-top:15px;color:#aaa;font-size:13px">Total concluído: <b style="color:#fff">'+br(d.total_geral)+'</b></div></div>';}
 function mostrar(view,el){currentView=view;document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));if(el)el.classList.add('active');if(view==='historico'){minhas();renderHistorico(window._minhas||[]);document.getElementById('sheetTitle').textContent='Histórico de corridas';document.getElementById('sheetSub').textContent='Confira suas corridas e os respectivos valores.'}else if(view==='ganhos'){ganhos();document.getElementById('sheetTitle').textContent='Meus ganhos';document.getElementById('sheetSub').textContent='Acompanhe quanto você ganhou.'}else{document.getElementById('sheetTitle').textContent=online?'Você está online':'Você está offline';document.getElementById('sheetSub').textContent=online?'Aguardando novos pedidos em Aragoiânia.':'Fique online para receber novos pedidos em Aragoiânia.';carregar();}}
 function testarSom(){try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=720;g.gain.value=.07;o.connect(g);g.connect(c.destination);o.start();setTimeout(()=>o.frequency.value=1050,130);setTimeout(()=>{o.stop();c.close()},380)}catch(e){}}
-initMap();status();carregar();minhas();ganhos();setInterval(()=>{status();carregar();minhas();ganhos()},5000);
+initMap();status();carregar();minhas();ganhos();setInterval(()=>{
+  status();
+  if(!window._corridaEmFluxo){
+    carregar();
+  }
+  minhas();
+  ganhos();
+},5000);
 </script>
 </body>
 </html>
@@ -6328,87 +6335,137 @@ def alerta_sonoro_motorista(response):
   }
 
   async function aceitarCorridaPopup(id){
-    const botao = document.getElementById("btn-aceitar-popup");
+    const botao=document.getElementById("btn-aceitar-popup");
 
     if(botao){
-      botao.disabled = true;
-      botao.textContent = "⏳ ACEITANDO...";
-      botao.style.opacity = "0.7";
+      botao.disabled=true;
+      botao.textContent="⏳ ACEITANDO...";
+      botao.style.opacity="0.7";
     }
 
     try{
-      const r = await fetch(
-        "/api/corrida/"+id+"/aceitar",
-        {
-          method:"POST",
-          credentials:"same-origin"
-        }
-      );
+      const r=await fetch("/api/corrida/"+id+"/aceitar",{
+        method:"POST",
+        credentials:"same-origin",
+        cache:"no-store"
+      });
 
-      const textoResposta = await r.text();
-
+      const texto=await r.text();
       let d;
+
       try{
-        d = JSON.parse(textoResposta);
+        d=JSON.parse(texto);
       }catch(e){
-        console.log("RESPOSTA DO SERVIDOR:", textoResposta);
-        toast("Erro no servidor. HTTP " + r.status);
-        if(botao){
-          botao.disabled = false;
-          botao.textContent = "🟢 ACEITAR CORRIDA";
-          botao.style.opacity = "1";
-        }
-        return;
+        console.log("RESPOSTA ACEITE:",texto);
+        throw new Error("Servidor retornou resposta inválida HTTP "+r.status);
       }
+
+      console.log("ACEITE:",d);
 
       if(!r.ok || !d.ok){
-        console.log("ERRO AO ACEITAR:", r.status, d);
-        toast(d.erro || ("Erro HTTP " + r.status));
-        if(botao){
-          botao.disabled = false;
-          botao.textContent = "🟢 ACEITAR CORRIDA";
-          botao.style.opacity = "1";
-        }
-        return;
+        throw new Error(d.erro || ("Erro HTTP "+r.status));
       }
 
-      const painel = document.getElementById("contador-nova-corrida");
+      const painel=document.getElementById("contador-nova-corrida");
       if(painel) painel.remove();
 
       clearInterval(window._contadorNovaCorrida);
 
       toast("🟢 CORRIDA ACEITA!");
+      window._corridaEmFluxo=true;
 
-      /* Mostra a corrida aceita imediatamente.
-         Qualquer erro posterior de atualização não desfaz o aceite. */
-      if(d.corrida){
+      /*
+       * IMPORTANTE:
+       * mostra a corrida aceita imediatamente.
+       */
+      let corrida=d.corrida || null;
+
+      /*
+       * Se o servidor não devolver a corrida completa,
+       * busca novamente pelo endpoint das corridas do motorista.
+       */
+      if(!corrida){
         try{
-          window._minhas = window._minhas || [];
-          window._minhas = [
-            d.corrida,
-            ...window._minhas.filter(x => x.id !== d.corrida.id)
-          ];
+          const rr=await fetch("/api/motorista/minhas-corridas",{
+            cache:"no-store",
+            credentials:"same-origin"
+          });
 
-          if(currentView==='pedidos' || currentView==='inicio'){
-            renderPedidos([], [d.corrida]);
+          const mm=await rr.json();
+
+          if(mm.ok && Array.isArray(mm.corridas)){
+            corrida=mm.corridas.find(x=>String(x.id)===String(id)) || null;
           }
-        }catch(erroTela){
-          console.log("ERRO AO MOSTRAR CORRIDA:", erroTela);
+        }catch(e){
+          console.log("Erro buscando corrida aceita:",e);
         }
       }
 
-      /* Atualizações secundárias em segundo plano */
-      try{ await minhas(); }catch(e){}
-      try{ await ganhos(); }catch(e){}
+      if(corrida){
+        console.log("CORRIDA ACEITA ENCONTRADA:",corrida);
+
+        window._minhas=window._minhas || [];
+
+        window._minhas=[
+          corrida,
+          ...window._minhas.filter(x=>String(x.id)!==String(corrida.id))
+        ];
+
+        /*
+         * Não depende de currentView.
+         * A corrida aceita SEMPRE aparece na tela.
+         */
+        renderPedidos([], [corrida]);
+
+      }else{
+        console.log("ATENÇÃO: corrida aceita não encontrada após aceite:",id);
+
+        toast("⚠️ Corrida aceita, atualizando tela...");
+
+        /*
+         * Última tentativa.
+         */
+        setTimeout(async function(){
+          try{
+            const rr=await fetch("/api/motorista/minhas-corridas",{
+              cache:"no-store",
+              credentials:"same-origin"
+            });
+
+            const mm=await rr.json();
+
+            if(mm.ok && Array.isArray(mm.corridas)){
+              const c=mm.corridas.find(x=>String(x.id)===String(id));
+
+              if(c){
+                window._minhas=mm.corridas;
+                renderPedidos([], [c]);
+              }
+            }
+          }catch(e){
+            console.log("Última tentativa falhou:",e);
+          }
+        },1000);
+      }
+
+      /*
+       * Ganhos é secundário.
+       * Não deixamos nenhum erro dele esconder a corrida.
+       */
+      try{
+        await ganhos();
+      }catch(e){
+        console.log("Erro atualizando ganhos:",e);
+      }
 
     }catch(e){
-      console.log("ERRO NO ACEITE:", e);
-      toast("Erro ao processar o aceite: " + (e.message || e));
+      console.log("ERRO NO ACEITE:",e);
+      toast("❌ "+(e.message || "Erro ao aceitar corrida."));
 
       if(botao){
-        botao.disabled = false;
-        botao.textContent = "🟢 ACEITAR CORRIDA";
-        botao.style.opacity = "1";
+        botao.disabled=false;
+        botao.textContent="🟢 ACEITAR CORRIDA";
+        botao.style.opacity="1";
       }
     }
   }
