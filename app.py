@@ -5052,10 +5052,24 @@ def api_aceitar_corrida(id):
         WHERE id=? AND status='PENDENTE' AND motorista_id IS NULL
     """, (mid, id))
     conn.commit()
-    conn.close()
+
     if cur.rowcount == 0:
+        conn.close()
         return {"ok": False, "erro": "Essa corrida já foi aceita por outro motorista."}
-    return {"ok": True}
+
+    corrida = conn.execute("""
+        SELECT c.*, p.nome AS passageiro_nome, p.telefone AS passageiro_telefone
+        FROM corridas_vai c
+        LEFT JOIN passageiros p ON p.id=c.passageiro_id
+        WHERE c.id=? AND c.motorista_id=?
+    """, (id, mid)).fetchone()
+
+    conn.close()
+
+    return {
+        "ok": True,
+        "corrida": dict(corrida) if corrida else None
+    }
 
 
 @app.route("/motorista/cheguei/<int:id>", methods=["POST"])
@@ -6329,6 +6343,20 @@ def alerta_sonoro_motorista(response):
 
       await minhas();
       await ganhos();
+
+      if(d.corrida){
+        window._minhas = window._minhas || [];
+
+        window._minhas = [
+          d.corrida,
+          ...window._minhas.filter(x => x.id !== d.corrida.id)
+        ];
+
+        if(currentView==='pedidos' || currentView==='inicio'){
+          renderPedidos([], [d.corrida]);
+        }
+      }
+
       await carregar();
       setTimeout(() => carregar(), 800);
 
