@@ -3549,6 +3549,12 @@ body{overscroll-behavior:none}
 .handle{width:45px;height:5px;border-radius:5px;background:#3b3b3b;margin:0 auto 14px}
 .sheet-title{font-size:20px;font-weight:900;margin-bottom:8px}.sheet-sub{font-size:13px;color:#858585;margin-bottom:12px}
 .ride-card{background:#151515;border:1px solid #292929;border-radius:17px;padding:13px;margin:10px 0}.ride-row{display:flex;justify-content:space-between;gap:12px}.ride-main{font-size:14px;line-height:1.45}.ride-price{font-size:20px;font-weight:900;color:#fff;white-space:nowrap}.ride-muted{color:#999;font-size:12px}.ride-actions{display:flex;gap:9px;margin-top:12px}.ride-actions button{flex:1;border:0;border-radius:12px;padding:12px;font-weight:900}.btn-accept{background:#22b45b;color:#07130c}.btn-reject{background:#2b2b2b;color:#eee}
+.btn-go-client{background:#168cff;color:#fff}
+.btn-go-dest{background:#ff7900;color:#111}
+.btn-finish{background:#e51f2a;color:#fff}
+.flow-actions{display:flex;flex-direction:column}
+.flow-actions button{width:100%;font-size:15px;padding:14px!important}
+.active-ride{border:1px solid #ff7900;box-shadow:0 0 0 1px rgba(255,122,0,.12)}
 .stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.stat{background:#151515;border-radius:15px;padding:13px 9px;text-align:center}.stat b{display:block;font-size:17px}.stat span{font-size:10px;color:#888}
 .empty{padding:26px 10px;text-align:center;color:#777}.empty strong{display:block;color:#ddd;margin-bottom:5px}
 .bottom-nav{position:absolute;z-index:30;bottom:0;left:0;right:0;height:calc(62px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(5,1fr);background:#050505;border-top:1px solid #1c1c1c}
@@ -3634,25 +3640,206 @@ async function alternarStatus(){
 }
 async function carregar(){
  try{
-  const r=await fetch('/api/corridas-disponiveis',{cache:'no-store'}),d=await r.json();
-  if(!d.ok){document.getElementById('lista').innerHTML='<div class="empty">'+(d.erro||'Erro ao carregar pedidos.')+'</div>';return;}
-  const rides=d.corridas||[];
-  if(currentView==='pedidos' || currentView==='inicio') renderPedidos(rides);
-  if(rides.some(x=>!lastRideIds.has(x.id)) && online && lastRideIds.size){testarSom();toast('🔔 Nova corrida disponível!');}
-  lastRideIds=new Set(rides.map(x=>x.id));
+  Promise.all([
+   fetch('/api/corridas-disponiveis',{cache:'no-store'}).then(r=>r.json()),
+   fetch('/api/motorista/minhas-corridas',{cache:'no-store'}).then(r=>r.json())
+  ]).then(([d,m])=>{
+   const pendentes=d.ok?(d.corridas||[]):[];
+   const todas=m.ok?(m.corridas||[]):[];
+   const ativas=todas.filter(x=>['ACEITA','EM_ANDAMENTO'].includes(x.status));
+
+   if(currentView==='pedidos' || currentView==='inicio'){
+    renderPedidos(pendentes,ativas);
+   }
+
+   if(pendentes.some(x=>!lastRideIds.has(x.id)) && online && lastRideIds.size){
+    testarSom();
+    toast('🔔 Nova corrida disponível!');
+   }
+
+   lastRideIds=new Set(pendentes.map(x=>x.id));
+   window._minhas=todas;
+  });
  }catch(e){}
 }
-function renderPedidos(rides){
+
+function renderPedidos(rides,ativas){
  const box=document.getElementById('lista');
- if(!online){box.innerHTML='<div class="empty"><strong>Você está offline</strong>Ative o online para começar a receber corridas.</div>';return;}
- if(!rides.length){box.innerHTML='<div class="empty"><strong>Nenhuma corrida no momento</strong>Fique online. Quando surgir um pedido, ele aparecerá aqui.</div>';return;}
- box.innerHTML=rides.map(c=>`<div class="ride-card"><div class="ride-row"><div class="ride-main"><b>Corrida #${c.id}</b><br>📍 ${esc(c.origem)}<br>🏁 ${esc(c.destino)}<br><span class="ride-muted">💵 ${c.pagamento||'Dinheiro'}</span></div><div class="ride-price">${br(c.valor)}</div></div><div class="ride-actions"><button class="btn-reject" onclick="ignorarPedido(${c.id},this)">IGNORAR</button><button class="btn-accept" onclick="aceitar(${c.id})">ACEITAR</button></div></div>`).join('');
+ let html='';
+
+ if(ativas && ativas.length){
+  html += ativas.map(c=>{
+   const origem=encodeURIComponent(c.origem||'');
+   const destino=encodeURIComponent(c.destino||'');
+
+   const mapsOrigem='https://www.google.com/maps/dir/?api=1&destination='+origem;
+   const mapsDestino='https://www.google.com/maps/dir/?api=1&destination='+destino;
+
+   if(c.status==='ACEITA'){
+    return `
+    <div class="ride-card active-ride">
+      <div class="ride-row">
+        <div class="ride-main">
+          <b>🏍️ CORRIDA #${c.id} ACEITA</b><br>
+          👤 ${esc(c.passageiro_nome||'Passageiro')}<br>
+          📍 ${esc(c.origem)}<br>
+          🏁 ${esc(c.destino)}<br>
+          <span class="ride-muted">💵 ${c.pagamento||'Dinheiro'}</span>
+        </div>
+        <div class="ride-price">${br(c.valor)}</div>
+      </div>
+
+      <div class="ride-actions flow-actions">
+        <button class="btn-go-client"
+          onclick="irCliente(${c.id},'${mapsOrigem}')">
+          🔵 IR ATÉ O CLIENTE
+        </button>
+
+        <button class="btn-go-dest"
+          onclick="irDestino(${c.id},'${mapsDestino}')">
+          🟠 IR ATÉ O DESTINO
+        </button>
+
+        <button class="btn-finish"
+          onclick="concluir(${c.id})">
+          🔴 CONCLUIR CORRIDA
+        </button>
+      </div>
+    </div>`;
+   }
+
+   return `
+   <div class="ride-card active-ride">
+     <div class="ride-row">
+       <div class="ride-main">
+         <b>🏁 CORRIDA #${c.id} EM ANDAMENTO</b><br>
+         👤 ${esc(c.passageiro_nome||'Passageiro')}<br>
+         📍 ${esc(c.origem)}<br>
+         🏁 ${esc(c.destino)}
+       </div>
+       <div class="ride-price">${br(c.valor)}</div>
+     </div>
+
+     <div class="ride-actions flow-actions">
+       <button class="btn-go-dest"
+         onclick="abrirMaps('${mapsDestino}')">
+         🟠 IR ATÉ O DESTINO
+       </button>
+
+       <button class="btn-finish"
+         onclick="concluir(${c.id})">
+         🔴 CONCLUIR CORRIDA
+       </button>
+     </div>
+   </div>`;
+  }).join('');
+ }
+
+ if(online && rides.length){
+  html += rides.map(c=>`
+   <div class="ride-card">
+     <div class="ride-row">
+       <div class="ride-main">
+         <b>🆕 NOVA CORRIDA #${c.id}</b><br>
+         📍 ${esc(c.origem)}<br>
+         🏁 ${esc(c.destino)}<br>
+         <span class="ride-muted">💵 ${c.pagamento||'Dinheiro'}</span>
+       </div>
+       <div class="ride-price">${br(c.valor)}</div>
+     </div>
+
+     <div class="ride-actions">
+       <button class="btn-reject"
+         onclick="ignorarPedido(${c.id},this)">
+         IGNORAR
+       </button>
+
+       <button class="btn-accept"
+         onclick="aceitar(${c.id})">
+         🟢 ACEITAR CORRIDA
+       </button>
+     </div>
+   </div>`).join('');
+ }
+
+ if(!html){
+  html=`
+   <div class="empty">
+    <strong>${!online?'Você está offline':'Nenhuma corrida no momento'}</strong>
+    ${!online?'Ative o online para receber corridas.':'Quando surgir um pedido, ele aparecerá aqui.'}
+   </div>`;
+ }
+
+ box.innerHTML=html;
 }
-function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
-async function aceitar(id){
- const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'}),d=await r.json();
- if(!d.ok){toast(d.erro||'Não foi possível aceitar.');return} toast('Corrida aceita! 🏍️');carregar();minhas();
+
+function abrirMaps(url){
+ window.open(url,'_blank');
 }
+
+async function irCliente(id,url){
+ abrirMaps(url);
+ toast('🔵 Rota até o cliente aberta.');
+}
+
+async function irDestino(id,url){
+ try{
+  const chegada=await fetch('/motorista/cheguei/'+id,{
+   method:'POST'
+  });
+
+  if(!chegada.ok){
+   toast('Não foi possível registrar a chegada.');
+   return;
+  }
+
+  const r=await fetch('/api/corrida/'+id+'/iniciar',{
+   method:'POST'
+  });
+
+  const d=await r.json();
+
+  if(!d.ok){
+   toast(d.erro||'Não foi possível iniciar a corrida.');
+   return;
+  }
+
+  abrirMaps(url);
+  toast('🟠 Corrida iniciada. Rota até o destino aberta.');
+
+  carregar();
+  minhas();
+  ganhos();
+
+ }catch(e){
+  toast('Erro de conexão.');
+ }
+}
+
+async function concluir(id){
+ try{
+  const r=await fetch('/api/corrida/'+id+'/concluir',{
+   method:'POST'
+  });
+
+  const d=await r.json();
+
+  if(!d.ok){
+   toast(d.erro||'Não foi possível concluir a corrida.');
+   return;
+  }
+
+  toast('🔴 Corrida concluída! 💰');
+
+  carregar();
+  minhas();
+  ganhos();
+
+ }catch(e){
+  toast('Erro de conexão.');
+ }
+}
+
 function ignorarPedido(id,btn){const card=btn.closest('.ride-card');if(card)card.style.display='none';}
 async function minhas(){
  try{const r=await fetch('/api/motorista/minhas-corridas',{cache:'no-store'}),d=await r.json(); if(!d.ok)return; window._minhas=d.corridas||[]; if(currentView==='historico')renderHistorico(window._minhas);}catch(e){}
