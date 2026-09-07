@@ -7118,7 +7118,15 @@ Chegue ao seu destino com praticidade.
 </a>
 
 <a class="btn btn-secundario" href="/login_passageiro">
-🔐 JÁ TENHO UMA CONTA
+🔐 JÁ TENHO UMA CONTA DE PASSAGEIRO
+</a>
+
+<a class="btn btn-principal" href="/cadastro/motorista">
+🏍️ QUERO SER MOTORISTA
+</a>
+
+<a class="btn btn-secundario" href="/login-motorista">
+🏍️ ENTRAR COMO MOTORISTA
 </a>
 
 <div class="info">
