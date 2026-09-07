@@ -3692,17 +3692,17 @@ function renderPedidos(rides,ativas){
       <div class="ride-actions flow-actions">
         <button class="btn-go-client"
           onclick="irCliente(${c.id},'${mapsOrigem}')">
-          🔵 IR ATÉ O CLIENTE
+          🗺️ GOOGLE MAPS<br><small>IR ATÉ O PASSAGEIRO</small>
         </button>
 
-        <button class="btn-go-dest"
-          onclick="irDestino(${c.id},'${mapsDestino}')">
-          🟠 IR ATÉ O DESTINO
+        <button class="btn-waze"
+          onclick="irClienteWaze(${c.id},'https://www.waze.com/ul?q='+encodeURIComponent('${esc(c.origem||'')}')+'&navigate=yes')">
+          🚗 WAZE<br><small>IR ATÉ O PASSAGEIRO</small>
         </button>
 
         <button class="btn-finish"
-          onclick="concluir(${c.id})">
-          🔴 CONCLUIR CORRIDA
+          onclick="iniciarCorrida(${c.id})">
+          📍 CHEGUEI AO PASSAGEIRO<br><small>INICIAR CORRIDA</small>
         </button>
       </div>
     </div>`;
@@ -3722,13 +3722,18 @@ function renderPedidos(rides,ativas){
 
      <div class="ride-actions flow-actions">
        <button class="btn-go-dest"
-         onclick="abrirMaps('${mapsDestino}')">
-         🟠 IR ATÉ O DESTINO
+         onclick="irDestino(${c.id},'${mapsDestino}')">
+         🗺️ GOOGLE MAPS<br><small>IR ATÉ O DESTINO</small>
+       </button>
+
+       <button class="btn-waze"
+         onclick="irDestinoWaze(${c.id},'https://www.waze.com/ul?q='+encodeURIComponent('${esc(c.destino||'')}')+'&navigate=yes')">
+         🚗 WAZE<br><small>IR ATÉ O DESTINO</small>
        </button>
 
        <button class="btn-finish"
          onclick="concluir(${c.id})">
-         🔴 CONCLUIR CORRIDA
+         ✅ CONCLUIR CORRIDA
        </button>
      </div>
    </div>`;
@@ -3777,12 +3782,31 @@ function abrirMaps(url){
  window.open(url,'_blank');
 }
 
+function abrirWaze(url){
+ window.open(url,'_blank');
+}
+
 async function irCliente(id,url){
  abrirMaps(url);
- toast('🔵 Rota até o cliente aberta.');
+ toast('🔵 Rota até o passageiro aberta no Google Maps.');
+}
+
+async function irClienteWaze(id,url){
+ abrirWaze(url);
+ toast('🚗 Rota até o passageiro aberta no Waze.');
 }
 
 async function irDestino(id,url){
+ abrirMaps(url);
+ toast('🗺️ Rota até o destino aberta no Google Maps.');
+}
+
+async function irDestinoWaze(id,url){
+ abrirWaze(url);
+ toast('🚗 Rota até o destino aberta no Waze.');
+}
+
+async function iniciarCorrida(id){
  try{
   const chegada=await fetch('/motorista/cheguei/'+id,{
    method:'POST'
@@ -3804,9 +3828,7 @@ async function irDestino(id,url){
    return;
   }
 
-  abrirMaps(url);
-  toast('🟠 Corrida iniciada. Rota até o destino aberta.');
-
+  toast('🏍️ Corrida iniciada!');
   carregar();
   minhas();
   ganhos();
@@ -3830,7 +3852,6 @@ async function concluir(id){
   }
 
   toast('🔴 Corrida concluída! 💰');
-
   carregar();
   minhas();
   ganhos();
