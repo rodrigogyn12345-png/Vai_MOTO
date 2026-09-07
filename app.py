@@ -6213,10 +6213,13 @@ def alerta_sonoro_motorista(response):
       '<button id="btn-aceitar-popup" ' +
       'style="margin-top:14px;width:100%;padding:16px;border:0;border-radius:12px;' +
       'background:#16a34a;color:white;font-size:20px;font-weight:900;" ' +
-      'onclick="aceitarCorridaPopup('+id+')">' +
+      '>' +
       '🟢 ACEITAR CORRIDA</button>';
 
     document.body.appendChild(painel);
+
+    const botaoPopup = document.getElementById("btn-aceitar-popup");
+    if(botaoPopup){ botaoPopup.addEventListener("click", function(e){ e.preventDefault(); e.stopPropagation(); aceitarCorridaPopup(id); }); }
 
     const relogio = setInterval(function(){
       n--;
