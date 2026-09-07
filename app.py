@@ -3304,7 +3304,32 @@ async function carregarCorridas(){
         }
       );
 
-      const d = await r.json();
+      const textoResposta = await r.text();
+
+      let d;
+      try{
+        d = JSON.parse(textoResposta);
+      }catch(e){
+        console.log("RESPOSTA DO SERVIDOR:", textoResposta);
+        toast("Erro no servidor. HTTP " + r.status);
+        if(botao){
+          botao.disabled = false;
+          botao.textContent = "🟢 ACEITAR CORRIDA";
+          botao.style.opacity = "1";
+        }
+        return;
+      }
+
+      if(!r.ok){
+        console.log("HTTP:", r.status, d);
+        toast(d.erro || ("Erro HTTP " + r.status));
+        if(botao){
+          botao.disabled = false;
+          botao.textContent = "🟢 ACEITAR CORRIDA";
+          botao.style.opacity = "1";
+        }
+        return;
+      }
 
       if(!d.ok){
         msg(d.erro || "Não foi possível cancelar a corrida.","erro");
