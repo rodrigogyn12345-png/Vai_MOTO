@@ -6294,7 +6294,8 @@ def alerta_sonoro_motorista(response):
 
       await minhas();
       await ganhos();
-      carregar();
+      await carregar();
+      setTimeout(() => carregar(), 800);
 
     }catch(e){
       toast("Erro de conexão ao aceitar a corrida.");
