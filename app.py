@@ -3640,27 +3640,62 @@ async function alternarStatus(){
 }
 async function carregar(){
  try{
-  Promise.all([
-   fetch('/api/corridas-disponiveis',{cache:'no-store'}).then(r=>r.json()),
-   fetch('/api/motorista/minhas-corridas',{cache:'no-store'}).then(r=>r.json())
-  ]).then(([d,m])=>{
-   const pendentes=d.ok?(d.corridas||[]):[];
-   const todas=m.ok?(m.corridas||[]):[];
-   const ativas=todas.filter(x=>['ACEITA','EM_ANDAMENTO'].includes(x.status));
+  let pendentes=[];
+  let todas=[];
 
-   if(currentView==='pedidos' || currentView==='inicio'){
-    renderPedidos(pendentes,ativas);
+  try{
+   const r=await fetch('/api/corridas-disponiveis',{
+    cache:'no-store',
+    credentials:'same-origin'
+   });
+   if(r.ok){
+    const d=await r.json();
+    if(d.ok) pendentes=d.corridas||[];
    }
+  }catch(e){
+   console.log('Erro corridas disponíveis:',e);
+  }
 
-   if(pendentes.some(x=>!lastRideIds.has(x.id)) && online && lastRideIds.size){
-    testarSom();
-    toast('🔔 Nova corrida disponível!');
+  async function buscarMinhasCorridas(){
+   const r=await fetch('/api/motorista/minhas-corridas',{
+    cache:'no-store',
+    credentials:'same-origin'
+   });
+   if(!r.ok) throw new Error('HTTP '+r.status);
+   const m=await r.json();
+   if(!m.ok) throw new Error(m.erro||'API retornou ok=false');
+   return m.corridas||[];
+  }
+
+  try{
+   todas=await buscarMinhasCorridas();
+  }catch(e){
+   console.log('Primeira tentativa minhas-corridas falhou:',e);
+   await new Promise(resolve=>setTimeout(resolve,500));
+   try{
+    todas=await buscarMinhasCorridas();
+   }catch(e2){
+    console.log('Segunda tentativa minhas-corridas falhou:',e2);
    }
+  }
 
-   lastRideIds=new Set(pendentes.map(x=>x.id));
-   window._minhas=todas;
-  });
- }catch(e){}
+  const ativas=todas.filter(x=>['ACEITA','EM_ANDAMENTO'].includes(x.status));
+
+  if(currentView==='pedidos' || currentView==='inicio'){
+   renderPedidos(pendentes,ativas);
+  }
+
+  if(pendentes.some(x=>!lastRideIds.has(x.id)) && online && lastRideIds.size){
+   testarSom();
+   toast('🔔 Nova corrida disponível!');
+  }
+
+  lastRideIds=new Set(pendentes.map(x=>x.id));
+  window._minhas=todas;
+
+ }catch(e){
+  console.log('Erro geral ao carregar:',e);
+ }
 }
 
 function renderPedidos(rides,ativas){
