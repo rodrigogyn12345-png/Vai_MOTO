@@ -7020,6 +7020,118 @@ def alerta_sonoro_motorista(response):
 
     return response
 
+
+@app.route("/anuncio-passageiro")
+def anuncio_passageiro():
+    return """
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex">
+<title>VAI_DE_MOTO - Aragoiânia</title>
+<style>
+*{box-sizing:border-box}
+body{
+    margin:0;
+    font-family:Arial,Helvetica,sans-serif;
+    background:#f5f5f5;
+    color:#111;
+}
+.container{
+    max-width:520px;
+    margin:0 auto;
+    padding:22px 16px 35px;
+}
+.card{
+    background:#fff;
+    border-radius:18px;
+    padding:28px 20px;
+    text-align:center;
+    box-shadow:0 3px 15px rgba(0,0,0,.10);
+}
+.logo{
+    font-size:32px;
+    font-weight:800;
+    margin-bottom:5px;
+}
+.local{
+    color:#555;
+    font-size:16px;
+    margin-bottom:25px;
+}
+h1{
+    font-size:27px;
+    line-height:1.2;
+    margin:10px 0 12px;
+}
+.texto{
+    font-size:17px;
+    line-height:1.5;
+    color:#444;
+    margin-bottom:24px;
+}
+.btn{
+    display:block;
+    width:100%;
+    padding:17px 12px;
+    margin:12px 0;
+    border-radius:11px;
+    text-decoration:none;
+    font-size:17px;
+    font-weight:bold;
+}
+.btn-principal{
+    background:#168a3d;
+    color:#fff;
+}
+.btn-secundario{
+    background:#111;
+    color:#fff;
+}
+.info{
+    margin-top:22px;
+    font-size:14px;
+    line-height:1.5;
+    color:#666;
+}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="card">
+
+<div class="logo">🏍️ VAI_DE_MOTO</div>
+<div class="local">📍 Aragoiânia - GO</div>
+
+<h1>Sua corrida rápida e segura!</h1>
+
+<div class="texto">
+Chegue ao seu destino com praticidade.
+<br><br>
+<strong>Peça sua corrida pelo VAI_DE_MOTO.</strong>
+</div>
+
+<a class="btn btn-principal" href="/cadastro/passageiro">
+👤 CRIAR CONTA DE PASSAGEIRO
+</a>
+
+<a class="btn btn-secundario" href="/login_passageiro">
+🔐 JÁ TENHO UMA CONTA
+</a>
+
+<div class="info">
+VAI_DE_MOTO<br>
+Mobilidade rápida e local em Aragoiânia.
+</div>
+
+</div>
+</div>
+</body>
+</html>
+"""
+
 if __name__ == "__main__":
     iniciar_banco()
 
