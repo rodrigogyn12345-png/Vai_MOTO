@@ -3510,810 +3510,170 @@ def motorista():
     if "motorista_id" not in session:
         return redirect(url_for("login_motorista"))
 
-    mid = _motorista_logado()
+    nome = session.get("motorista_nome", "Motorista")
+    inicial = (nome[:1] or "M").upper()
 
-    conn = conectar()
-
-    m = conn.execute("""
-        SELECT id,nome,status,conexao
-        FROM motoqueiros
-        WHERE id=?
-    """, (mid,)).fetchone()
-
-    if not m or m["status"] != "aprovado":
-        conn.close()
-        session.clear()
-        return redirect(url_for("login_motorista"))
-
-    # Corridas disponíveis para qualquer motorista aprovado e online
-    disponiveis = conn.execute("""
-        SELECT
-            c.id,
-            c.origem,
-            c.destino,
-            c.valor,
-            c.valor_motorista,
-            c.distancia_km,
-            c.pagamento,
-            c.status,
-            c.criado_em
-        FROM corridas_vai c
-        WHERE c.status='PENDENTE'
-          AND c.motorista_id IS NULL
-        ORDER BY c.id DESC
-        LIMIT 20
-    """).fetchall()
-
-    # Corridas deste motorista
-    minhas = conn.execute("""
-        SELECT
-            c.id,
-            c.origem,
-            c.destino,
-            c.valor,
-            c.valor_motorista,
-            c.distancia_km,
-            c.pagamento,
-            c.status,
-            c.etapa,
-            c.criado_em,
-            p.nome AS passageiro_nome,
-            p.telefone AS passageiro_telefone
-        FROM corridas_vai c
-        LEFT JOIN passageiros p
-          ON p.id=c.passageiro_id
-        WHERE c.motorista_id=?
-        ORDER BY c.id DESC
-        LIMIT 20
-    """, (mid,)).fetchall()
-
-    hoje = conn.execute("""
-        SELECT
-            COUNT(*) AS quantidade,
-            COALESCE(SUM(valor_motorista),0) AS total
-        FROM corridas_vai
-        WHERE motorista_id=?
-          AND status='CONCLUIDA'
-          AND date(concluido_em)=date('now','localtime')
-    """, (mid,)).fetchone()
-
-    geral = conn.execute("""
-        SELECT
-            COALESCE(SUM(valor_motorista),0) AS total
-        FROM corridas_vai
-        WHERE motorista_id=?
-          AND status='CONCLUIDA'
-    """, (mid,)).fetchone()
-
-    conn.close()
-
-    import html
-
-    nome = html.escape(str(m["nome"] or "Motorista"))
-    online = m["conexao"] == "online"
-
-    status_box = (
-        '<div class="motor-status online">🟢 ONLINE</div>'
-        if online else
-        '<div class="motor-status offline">⚪ OFFLINE</div>'
-    )
-
-    botao_status = (
-        '<a class="motor-btn amarelo" href="/motorista/alternar-status?acao=offline">DESATIVAR ONLINE</a>'
-        if online else
-        '<a class="motor-btn verde" href="/motorista/alternar-status?acao=online">ATIVAR ONLINE</a>'
-    )
-
-    disponiveis_html = ""
-
-    if not disponiveis:
-        disponiveis_html = """
-        <div class="vazio">
-            🚕 Nenhuma corrida disponível neste momento.
-            <br><small>Esta tela atualiza automaticamente.</small>
-        </div>
-        """
-    else:
-        for c in disponiveis:
-            valor = float(c["valor"] or 0)
-            valor_motorista = float(c["valor_motorista"] or 0)
-            taxa_app = valor * 0.09
-            distancia = float(c["distancia_km"] or 0)
-
-            origem_raw = str(c["origem"] or "")
-            destino_raw = str(c["destino"] or "")
-
-            origem = html.escape(origem_raw)
-            destino = html.escape(destino_raw)
-            pagamento = html.escape(str(c["pagamento"] or "DINHEIRO"))
-
-            waze_origem = quote(origem_raw, safe="")
-            waze_destino = quote(destino_raw, safe="")
-
-            disponiveis_html += f"""
-            <div class="corrida disponivel">
-                <div class="corrida-topo">
-                    <strong>🚕 CORRIDA #{c["id"]}</strong>
-                    <span class="pendente">PENDENTE</span>
-                </div>
-
-                <div class="linha">📍 <b>Origem:</b><br>{origem}</div>
-                <div class="linha">🏁 <b>Destino:</b><br>{destino}</div>
-                <div class="linha">📏 <b>Distância:</b> {distancia:.2f} km</div>
-                <div class="linha">💳 <b>Pagamento:</b> {pagamento}</div>
-
-                <div class="valores">
-                    <div>
-                        <small>Passageiro paga</small>
-                        <strong>R$ {valor:.2f}</strong>
-                    </div>
-                    <div>
-                        <small>Você recebe</small>
-                        <strong>R$ {valor_motorista:.2f}</strong>
-                    </div>
-                </div>
-
-                <form method="POST" action="/motorista/aceitar/{c["id"]}">
-                    <button class="motor-btn verde" type="submit">
-                        🏍️ ACEITAR CORRIDA
-                    </button>
-                </form>
-            </div>
-            """
-
-    minhas_html = ""
-
-    if not minhas:
-        minhas_html = """
-        <div class="vazio">
-            Você ainda não aceitou nenhuma corrida.
-        </div>
-        """
-    else:
-        for c in minhas:
-            origem = html.escape(str(c["origem"] or ""))
-            destino = html.escape(str(c["destino"] or ""))
-            passageiro = html.escape(str(c["passageiro_nome"] or "Passageiro"))
-            pagamento = html.escape(str(c["pagamento"] or "DINHEIRO"))
-
-            valor = float(c["valor"] or 0)
-            valor_motorista = float(c["valor_motorista"] or 0)
-            taxa_app = valor * 0.09
-
-            acoes = ""
-
-            etapa = str(c["etapa"] or "AGUARDANDO")
-
-
-            if c["status"] in ("ACEITA", "EM_ANDAMENTO"):
-                acoes += f"""
-                <form method="POST"
-                      action="/motorista/cancelar/{c["id"]}"
-                      onsubmit="return confirm('Tem certeza que deseja cancelar esta corrida?');">
-                    <button class="motor-btn vermelho" type="submit">
-                        🔴 CANCELAR CORRIDA
-                    </button>
-                </form>
-                """
-            if c["status"] == "ACEITA" and etapa in ("AGUARDANDO", ""):
-                acoes = f"""
-                <a class="motor-btn azul"
-                   href="https://www.google.com/maps/dir/?api=1&destination={origem.replace(" ", "+")}&travelmode=driving"
-                   target="_blank">
-                    🗺️ GOOGLE MAPS — IR ATÉ O PASSAGEIRO
-                </a>
-                <a class="motor-btn azul"
-       href="https://waze.com/ul?q={quote(str(c["origem"] or ""), safe="")}&navigate=yes"
-       target="_blank">
-        🚗 WAZE — IR ATÉ O PASSAGEIRO
-    </a>
-    <form method="POST" action="/motorista/cheguei/{c["id"]}">
-                    <button class="motor-btn amarelo" type="submit">
-                        📍 CHEGUEI AO PASSAGEIRO
-                    </button>
-                </form>
-                """
-
-            elif c["status"] == "ACEITA" and etapa == "CHEGOU":
-                acoes = f"""
-                <form method="POST" action="/motorista/iniciar/{c["id"]}">
-                    <button class="motor-btn azul" type="submit">
-                        🚦 INICIAR CORRIDA
-                    </button>
-                </form>
-                """
-
-            elif c["status"] == "EM_ANDAMENTO":
-                acoes = f"""
-                <a class="motor-btn azul"
-                   href="https://www.google.com/maps/dir/?api=1&destination={destino.replace(" ", "+")}&travelmode=driving"
-                   target="_blank">
-                    🗺️ GOOGLE MAPS — IR ATÉ O DESTINO
-                </a>
-                <a class="motor-btn azul"
-       href="https://waze.com/ul?q={quote(str(c["destino"] or ""), safe="")}&navigate=yes"
-       target="_blank">
-        🚗 WAZE — IR ATÉ O DESTINO
-    </a>
-    <form method="POST" action="/motorista/concluir/{c["id"]}">
-                    <button class="motor-btn verde" type="submit">
-                        ✅ FINALIZAR CORRIDA
-                    </button>
-                </form>
-                """
-
-            minhas_html += f"""
-            <div class="corrida">
-                <div class="corrida-topo">
-                    <strong>🚕 CORRIDA #{c["id"]}</strong>
-                    <span>{html.escape(str(c["status"]))}</span>
-                </div>
-
-                <div class="linha">👤 <b>Passageiro:</b> {passageiro}</div>
-                <div class="linha">📍 <b>Origem:</b><br>{origem}</div>
-                <div class="linha">🏁 <b>Destino:</b><br>{destino}</div>
-                <div class="linha">💳 <b>Pagamento:</b> {pagamento}</div>
-
-                <div class="valores">
-                    <div>
-                        <small>Corrida</small>
-                        <strong>R$ {valor:.2f}</strong>
-                    </div>
-                    <div>
-                        <small>Taxa VAI_DE_MOTO (9%)</small>
-                        <strong>R$ {taxa_app:.2f}</strong>
-                    </div>
-                    <div>
-                        <small>Seu ganho</small>
-                        <strong>R$ {valor_motorista:.2f}</strong>
-                    </div>
-                </div>
-                    <div>
-                        <small>Seu ganho</small>
-                        <strong>R$ {valor_motorista:.2f}</strong>
-                    </div>
-                </div>
-
-                {acoes}
-            </div>
-            """
-
-    corpo_motorista = f"""
+    return render_template_string(r'''
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<title>VAI_DE_MOTO • Motorista</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
-/* BOTÕES DE NAVEGAÇÃO ATÉ O PASSAGEIRO */
-a[href*="google.com/maps/dir"] {{
-    width: 100% !important;
-    min-height: 90px !important;
-    padding: 22px 14px !important;
-    font-size: 25px !important;
-    font-weight: 900 !important;
-    border-radius: 18px !important;
-    margin: 12px 0 !important;
-    display: block !important;
-    box-sizing: border-box !important;
-}}
-
-a[href*="waze.com/ul"] {{
-    width: 100% !important;
-    min-height: 90px !important;
-    padding: 22px 14px !important;
-    font-size: 25px !important;
-    font-weight: 900 !important;
-    border-radius: 18px !important;
-    margin: 12px 0 !important;
-    display: block !important;
-    box-sizing: border-box !important;
-}}
-
-/* BOTÃO ACEITAR CORRIDA GRANDE */
-form[action^="/motorista/aceitar/"] .motor-btn {{
-    width: 100% !important;
-    min-height: 105px !important;
-    padding: 28px 18px !important;
-    font-size: 30px !important;
-    font-weight: 900 !important;
-    border-radius: 18px !important;
-    margin: 18px 0 !important;
-    display: block !important;
-}}
-
-.motor-btn.vermelho {{
-    background:#b00000 !important;
-    color:#fff !important;
-    border:3px solid #fff !important;
-    font-weight:900 !important;
-}}
-
-.motor-status {{
-    padding:16px;
-    border-radius:14px;
-    font-size:20px;
-    font-weight:800;
-    text-align:center;
-    margin:12px 0;
-}}
-
-.motor-status.online {{
-    background:#d9f7df;
-    color:#137333;
-}}
-
-.motor-status.offline {{
-    background:#eeeeee;
-    color:#555;
-}}
-
-.motor-btn {{
-    display:block;
-    width:100%;
-    box-sizing:border-box;
-    padding:16px;
-    border:0;
-    border-radius:14px;
-    color:white;
-    text-align:center;
-    text-decoration:none;
-    font-size:17px;
-    font-weight:800;
-    margin-top:12px;
-    cursor:pointer;
-}}
-
-.motor-btn.verde {{
-    background:#16833b;
-}}
-
-.motor-btn.azul {{
-    background:#1769aa;
-}}
-
-.motor-btn.amarelo {{
-    background:#d99a00;
-    color:#111;
-}}
-
-.corrida {{
-    background:#f4f6f8;
-    border-radius:16px;
-    padding:17px;
-    margin:13px 0;
-    border:1px solid #e0e3e6;
-}}
-
-.corrida.disponivel {{
-    border:2px solid #16833b;
-    background:#f7fff9;
-}}
-
-.corrida-topo {{
-    display:flex;
-    justify-content:space-between;
-    gap:8px;
-    align-items:center;
-    margin-bottom:12px;
-    font-size:17px;
-}}
-
-.corrida-topo span {{
-    background:#e9ecef;
-    border-radius:20px;
-    padding:5px 9px;
-    font-size:12px;
-    font-weight:800;
-}}
-
-.pendente {{
-    background:#fff0b3 !important;
-    color:#7a5b00;
-}}
-
-.linha {{
-    margin:9px 0;
-    line-height:1.4;
-}}
-
-.valores {{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:10px;
-    margin-top:14px;
-}}
-
-.valores div {{
-    background:white;
-    border-radius:12px;
-    padding:12px;
-    text-align:center;
-}}
-
-.valores small {{
-    display:block;
-    color:#666;
-    margin-bottom:5px;
-}}
-
-.valores strong {{
-    display:block;
-    font-size:20px;
-}}
-
-.vazio {{
-    background:#f4f6f8;
-    border-radius:14px;
-    padding:20px;
-    text-align:center;
-    color:#555;
-}}
-
-.motor-menu {{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:8px;
-    margin-bottom:15px;
-}}
-
-.motor-menu a {{
-    background:#eeeeee;
-    color:#222;
-    padding:12px;
-    border-radius:12px;
-    text-decoration:none;
-    text-align:center;
-    font-weight:700;
-}}
-
-.ganhos-box {{
-    background:#f4f6f8;
-    border-radius:16px;
-    padding:18px;
-}}
-
-.ganho-num {{
-    font-size:25px;
-    font-weight:800;
-}}
-
-/* ===== PAINEL DO MOTORISTA - LETRAS GRANDES ===== */
-
-.motor-menu a {{
-    font-size:20px;
-    padding:16px 12px;
-    min-height:52px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-}}
-
-h2 {{
-    font-size:32px;
-    line-height:1.2;
-}}
-
-.motor-menu ~ h2 {{
-    font-size:32px;
-}}
-
-.pub-info {{
-    font-size:21px;
-    padding:18px;
-}}
-
-.pub-card h3 {{
-    font-size:25px;
-    line-height:1.25;
-}}
-
-.pub-card p {{
-    font-size:18px;
-    line-height:1.45;
-}}
-
-.pub-card {{
-    padding:20px;
-}}
-
-.pub-card button,
-.pub-card a {{
-    font-size:19px;
-}}
-
-.ganho-num {{
-    font-size:30px;
-}}
-
-.ganhos-box {{
-    font-size:19px;
-}}
-
-.ganhos-box strong {{
-    font-size:21px;
-}}
-
-button {{
-    font-size:19px !important;
-    min-height:52px;
-}}
-
-.pub-btn {{
-    font-size:19px !important;
-    min-height:52px;
-}}
-
-@media(max-width:600px) {{
-    .motor-menu a {{
-        font-size:20px;
-    }}
-
-    h2,
-    .motor-menu ~ h2 {{
-        font-size:30px;
-    }}
-
-    .pub-info {{
-        font-size:20px;
-    }}
-
-    .pub-card h3 {{
-        font-size:24px;
-    }}
-
-    .pub-card p {{
-        font-size:18px;
-    }}
-
-    .ganho-num {{
-        font-size:30px;
-    }}
-}}
-
-
-@media(max-width:600px) {{
-    .valores {{
-        grid-template-columns:1fr;
-    }}
-}}
-/* ===== NOVO VISUAL MOTORISTA ===== */
-
-body {{
-    background:#080808 !important;
-    color:#fff !important;
-}}
-
-.motor-menu {{
-    gap:10px;
-}}
-
-.motor-menu a {{
-    background:#151515 !important;
-    color:#fff !important;
-    border:1px solid #333 !important;
-    border-radius:14px !important;
-}}
-
-h2 {{
-    color:#fff !important;
-    font-size:30px !important;
-    font-weight:900 !important;
-}}
-
-.pub-info {{
-    background:#151515 !important;
-    color:#fff !important;
-    border:1px solid #333 !important;
-    border-radius:16px !important;
-}}
-
-.pub-card {{
-    background:#111 !important;
-    color:#fff !important;
-    border:1px solid #292929 !important;
-    border-radius:20px !important;
-    padding:20px !important;
-    box-shadow:0 6px 20px rgba(0,0,0,.35) !important;
-}}
-
-.pub-card h3 {{
-    color:#fff !important;
-    font-size:23px !important;
-    font-weight:900 !important;
-}}
-
-.pub-card p {{
-    color:#ccc !important;
-}}
-
-.corrida,
-.corrida.disponivel {{
-    background:#181818 !important;
-    color:#fff !important;
-    border:1px solid #333 !important;
-    border-radius:18px !important;
-    padding:18px !important;
-}}
-
-.corrida-topo {{
-    color:#fff !important;
-}}
-
-.corrida-topo span {{
-    background:#292929 !important;
-    color:#fff !important;
-}}
-
-.linha {{
-    color:#eee !important;
-}}
-
-.valores div {{
-    background:#222 !important;
-    color:#fff !important;
-    border:1px solid #333 !important;
-}}
-
-.valores small {{
-    color:#aaa !important;
-}}
-
-.valores strong {{
-    color:#fff !important;
-    font-size:23px !important;
-}}
-
-.ganhos-box {{
-    background:#181818 !important;
-    color:#fff !important;
-    border:1px solid #333 !important;
-    border-radius:18px !important;
-}}
-
-.ganho-num {{
-    color:#fff !important;
-    font-size:32px !important;
-}}
-
-.motor-status.online {{
-    background:#123d20 !important;
-    color:#43e56b !important;
-    border:2px solid #43e56b !important;
-}}
-
-.motor-status.offline {{
-    background:#222 !important;
-    color:#aaa !important;
-    border:1px solid #444 !important;
-}}
-
-.motor-btn {{
-    border-radius:16px !important;
-}}
-
-a[href*="google.com/maps/dir"],
-a[href*="waze.com/ul"] {{
-    min-height:90px !important;
-    font-size:25px !important;
-    font-weight:900 !important;
-}}
-
-@media(max-width:600px) {{
-    .pub-card {{
-        margin-left:-4px;
-        margin-right:-4px;
-    }}
-
-    .corrida {{
-        padding:16px !important;
-    }}
-}}
-
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;font-family:Arial,Helvetica,sans-serif;color:#fff}
+body{overscroll-behavior:none}
+.driver-app{position:fixed;inset:0;background:#050505;overflow:hidden}
+#map{position:absolute;inset:0;z-index:1;background:#dfe6eb}
+.leaflet-control-zoom{display:none!important}
+.leaflet-control-attribution{font-size:9px!important;background:rgba(255,255,255,.7)!important}
+.topbar{position:absolute;z-index:20;top:0;left:0;right:0;padding:calc(10px + env(safe-area-inset-top)) 14px 12px;display:flex;align-items:center;justify-content:space-between;background:linear-gradient(180deg,rgba(0,0,0,.9),rgba(0,0,0,.45),transparent)}
+.profile{display:flex;align-items:center;gap:10px;min-width:0}
+.avatar{width:43px;height:43px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:#171717;border:1px solid #f57c00;color:#ff8a00;font-size:20px;font-weight:800;box-shadow:0 0 0 3px rgba(0,0,0,.2)}
+.driver-name{font-weight:800;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:190px}
+.driver-role{font-size:12px;color:#9d9d9d;margin-top:2px}
+.profile-btn{width:42px;height:42px;border-radius:50%;border:1px solid #6e2800;background:rgba(10,10,10,.85);color:#ff7b00;font-size:21px;text-decoration:none;display:flex;align-items:center;justify-content:center}
+.earnings-pill{position:absolute;z-index:21;top:calc(72px + env(safe-area-inset-top));left:50%;transform:translateX(-50%);min-width:185px;padding:13px 18px;border-radius:30px;background:rgba(36,36,36,.94);box-shadow:0 8px 22px rgba(0,0,0,.3);text-align:center}
+.earnings-pill .money{font-size:20px;font-weight:900}.earnings-pill .today{font-size:11px;color:#aaa;margin-left:4px}
+.status-pill{position:absolute;z-index:22;top:calc(72px + env(safe-area-inset-top));right:12px;border:0;border-radius:24px;padding:11px 15px;background:#343434;color:#ddd;font-weight:800;box-shadow:0 7px 18px rgba(0,0,0,.25)}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#bbb}.status-pill.online{background:#17371f;color:#c9ffd5}.status-pill.online .status-dot{background:#32d46b;box-shadow:0 0 8px #32d46b}
+.status-pill.offline .status-dot{background:#aaa}
+.online-action{position:absolute;z-index:25;right:15px;top:calc(122px + env(safe-area-inset-top));border:0;border-radius:25px;padding:10px 15px;background:#ef7900;color:#111;font-weight:900;box-shadow:0 7px 18px rgba(0,0,0,.28);display:none}
+.online-action.off{display:block;background:#2b2b2b;color:#fff}
+.center-btn{position:absolute;z-index:20;right:14px;bottom:275px;width:52px;height:52px;border:0;border-radius:50%;background:#252525;color:#fff;font-size:22px;box-shadow:0 8px 20px rgba(0,0,0,.3)}
+.sound-btn{position:absolute;z-index:20;right:14px;bottom:207px;width:58px;height:58px;border-radius:50%;border:1px solid #111;background:#454545;color:#ff7a00;font-size:25px;box-shadow:0 8px 20px rgba(0,0,0,.35)}
+.sheet{position:absolute;z-index:15;left:0;right:0;bottom:62px;min-height:245px;max-height:58vh;background:rgba(5,5,5,.97);border-radius:28px 28px 0 0;box-shadow:0 -12px 30px rgba(0,0,0,.22);padding:13px 15px 20px;overflow:auto}
+.handle{width:45px;height:5px;border-radius:5px;background:#3b3b3b;margin:0 auto 14px}
+.sheet-title{font-size:20px;font-weight:900;margin-bottom:8px}.sheet-sub{font-size:13px;color:#858585;margin-bottom:12px}
+.ride-card{background:#151515;border:1px solid #292929;border-radius:17px;padding:13px;margin:10px 0}.ride-row{display:flex;justify-content:space-between;gap:12px}.ride-main{font-size:14px;line-height:1.45}.ride-price{font-size:20px;font-weight:900;color:#fff;white-space:nowrap}.ride-muted{color:#999;font-size:12px}.ride-actions{display:flex;gap:9px;margin-top:12px}.ride-actions button{flex:1;border:0;border-radius:12px;padding:12px;font-weight:900}.btn-accept{background:#22b45b;color:#07130c}.btn-reject{background:#2b2b2b;color:#eee}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}.stat{background:#151515;border-radius:15px;padding:13px 9px;text-align:center}.stat b{display:block;font-size:17px}.stat span{font-size:10px;color:#888}
+.empty{padding:26px 10px;text-align:center;color:#777}.empty strong{display:block;color:#ddd;margin-bottom:5px}
+.bottom-nav{position:absolute;z-index:30;bottom:0;left:0;right:0;height:calc(62px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);display:grid;grid-template-columns:repeat(5,1fr);background:#050505;border-top:1px solid #1c1c1c}
+.nav-item{border:0;background:transparent;color:#666;font-size:10px;font-weight:800;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}.nav-item .ico{font-size:22px;line-height:1}.nav-item.active{color:#ff7a00}.nav-item:active{transform:scale(.96)}
+.toast{position:absolute;z-index:50;left:50%;top:18%;transform:translateX(-50%);background:#171717;border:1px solid #333;border-radius:14px;padding:12px 16px;display:none;max-width:90%;font-weight:700;box-shadow:0 10px 30px #000}
+@media(min-width:700px){.sheet{left:50%;right:auto;transform:translateX(-50%);width:520px;bottom:72px;border-radius:28px}.bottom-nav{left:50%;right:auto;transform:translateX(-50%);width:520px;border-radius:18px 18px 0 0}.status-pill{right:calc(50% - 250px)}.online-action{right:calc(50% - 250px)}}
 </style>
+</head>
+<body>
+<div class="driver-app">
+  <div id="map"></div>
+  <div class="topbar">
+    <div class="profile"><div class="avatar">{{ inicial }}</div><div><div class="driver-name">{{ nome }}</div><div class="driver-role">Motorista VAI_DE_MOTO</div></div></div>
+    <a class="profile-btn" href="/logout-usuario" aria-label="Sair">♙</a>
+  </div>
 
-<div class="motor-menu">
-    <a href="/motorista">🏍️ Início</a>
-    <a href="/logout-usuario">🚪 Sair</a>
-</div>
+  <div class="earnings-pill"><span class="money" id="pillMoney">R$ 0,00</span><span class="today">hoje</span></div>
+  <button id="statusPill" class="status-pill offline" onclick="alternarStatus()"><span class="status-dot"></span><span id="statusText">Offline</span></button>
+  <button id="onlineAction" class="online-action off" onclick="alternarStatus()">FICAR ONLINE</button>
 
-<h2>🏍️ Painel do Motorista</h2>
+  <button class="center-btn" onclick="centralizar()" title="Centralizar">⌖</button>
+  <button class="sound-btn" onclick="testarSom()" title="Notificação">◉</button>
 
-<div class="pub-info">
-    Olá, <b>{nome}</b>!
-</div>
-
-{status_box}
-
-{botao_status}
-
-<div class="pub-card">
-    <h3>🚕 CORRIDAS DISPONÍVEIS</h3>
-    <p>As corridas pendentes aparecem aqui automaticamente.</p>
-    {disponiveis_html}
-</div>
-
-<div class="pub-card">
-    <h3>🚕 MINHAS CORRIDAS</h3>
-    {minhas_html}
-</div>
-
-<div class="pub-card">
-    <h3>💰 MEUS GANHOS</h3>
-
-    <div class="ganhos-box">
-        <p>📅 Corridas concluídas hoje</p>
-        <div class="ganho-num">{int(hoje["quantidade"] or 0)}</div>
-
-        <p>💵 Ganhos de hoje</p>
-        <div class="ganho-num">R$ {float(hoje["total"] or 0):.2f}</div>
-
-        <p>💰 Total concluído</p>
-        <div class="ganho-num">R$ {float(geral["total"] or 0):.2f}</div>
+  <div class="sheet" id="sheet">
+    <div class="handle"></div>
+    <div class="sheet-title" id="sheetTitle">Você está offline</div>
+    <div class="sheet-sub" id="sheetSub">Fique online para receber novos pedidos em Aragoiânia.</div>
+    <div class="stat-grid">
+      <div class="stat"><b id="hojeCorridas">0</b><span>CORRIDAS HOJE</span></div>
+      <div class="stat"><b id="hojeGanhos">R$ 0,00</b><span>GANHOS HOJE</span></div>
+      <div class="stat"><b id="totalGanhos">R$ 0,00</b><span>TOTAL</span></div>
     </div>
-</div>
+    <div id="lista"></div>
+  </div>
 
-<div class="pub-card">
-    <a class="motor-btn verde" href="/motorista/saque">
-        💰 SOLICITAR SAQUE
-    </a>
+  <nav class="bottom-nav">
+    <button class="nav-item active" onclick="mostrar('pedidos',this)"><span class="ico">🏍️</span>CORRIDAS</button>
+    <button class="nav-item" onclick="mostrar('inicio',this)"><span class="ico">⌂</span>INÍCIO</button>
+    <button class="nav-item" onclick="mostrar('pedidos',this)"><span class="ico">🛍️</span>PEDIDOS</button>
+    <button class="nav-item" onclick="mostrar('historico',this)"><span class="ico">▤</span>HISTÓRICO</button>
+    <button class="nav-item" onclick="mostrar('ganhos',this)"><span class="ico">▣</span>GANHOS</button>
+  </nav>
+  <div id="toast" class="toast"></div>
 </div>
-
-<div class="pub-card">
-    <a class="motor-btn azul" href="/motorista">
-        🔄 ATUALIZAR CORRIDAS
-    </a>
-</div>
-
-<!-- VAI_MOTO_GPS_HEARTBEAT -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-(function(){{
-
-    async function enviarGPSMotorista(){{
-
-        if(!navigator.geolocation){{
-            return;
-        }}
-
-        navigator.geolocation.getCurrentPosition(
-            async function(pos){{
-
-                try{{
-
-                    await fetch("/api/motorista/heartbeat", {{
-                        method:"POST",
-                        headers:{{
-                            "Content-Type":"application/json"
-                        }},
-                        credentials:"same-origin",
-                        body:JSON.stringify({{
-                            latitude:pos.coords.latitude,
-                            longitude:pos.coords.longitude
-                        }}),
-                        cache:"no-store"
-                    }});
-
-                }}catch(e){{}}
-
-            }},
-            function(e){{}},
-            {{
-                enableHighAccuracy:true,
-                timeout:10000,
-                maximumAge:5000
-            }}
-        );
-    }}
-
-    enviarGPSMotorista();
-
-    setInterval(
-        enviarGPSMotorista,
-        10000
-    );
-
-}})();
+const motoristaId={{ session.get('motorista_id')|tojson }};
+let online=false, map=null, marker=null, lastRideIds=new Set(), currentView='pedidos';
+function br(v){return Number(v||0).toLocaleString('pt-BR',{style:'currency',currency:'BRL'});}
+function toast(t){const x=document.getElementById('toast');x.textContent=t;x.style.display='block';clearTimeout(window._toast);window._toast=setTimeout(()=>x.style.display='none',2600)}
+function initMap(){
+  map=L.map('map',{zoomControl:false,attributionControl:true}).setView([-16.9167,-49.4483],14);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>setPosition(p.coords.latitude,p.coords.longitude),()=>{}, {enableHighAccuracy:true,timeout:10000});}
+}
+function setPosition(lat,lon){
+  if(!map)return;
+  if(!marker) marker=L.circleMarker([lat,lon],{radius:8,color:'#111',weight:3,fillColor:'#1e88ff',fillOpacity:1}).addTo(map);
+  else marker.setLatLng([lat,lon]);
+  map.setView([lat,lon],16);
+}
+function centralizar(){
+  if(navigator.geolocation){navigator.geolocation.getCurrentPosition(p=>setPosition(p.coords.latitude,p.coords.longitude),()=>toast('Permita o GPS para centralizar.'));}
+}
+async function status(){
+ try{
+  const r=await fetch('/api/motorista/me',{cache:'no-store'}),d=await r.json();
+  if(!d.ok)return;
+  online=d.conexao==='online';
+  const sp=document.getElementById('statusPill'),st=document.getElementById('statusText'),oa=document.getElementById('onlineAction');
+  sp.className='status-pill '+(online?'online':'offline');st.textContent=online?'Online':'Offline';
+  oa.textContent=online?'FICAR OFFLINE':'FICAR ONLINE';oa.className='online-action '+(online?'':'off');
+  document.getElementById('sheetTitle').textContent=online?'Você está online':'Você está offline';
+  document.getElementById('sheetSub').textContent=online?'Aguardando novos pedidos em Aragoiânia.':'Fique online para receber novos pedidos em Aragoiânia.';
+ }catch(e){}
+}
+async function alternarStatus(){
+ try{
+  const r=await fetch('/api/motorista/status',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({online:!online}),cache:'no-store'}),d=await r.json();
+  if(!d.ok){toast(d.erro||'Não foi possível alterar o status.');return;}
+  online=d.conexao==='online';toast(online?'Você está ONLINE 🟢':'Você está OFFLINE');status();carregar();
+ }catch(e){toast('Erro de conexão.');}
+}
+async function carregar(){
+ try{
+  const r=await fetch('/api/corridas-disponiveis',{cache:'no-store'}),d=await r.json();
+  if(!d.ok){document.getElementById('lista').innerHTML='<div class="empty">'+(d.erro||'Erro ao carregar pedidos.')+'</div>';return;}
+  const rides=d.corridas||[];
+  if(currentView==='pedidos' || currentView==='inicio') renderPedidos(rides);
+  if(rides.some(x=>!lastRideIds.has(x.id)) && online && lastRideIds.size){testarSom();toast('🔔 Nova corrida disponível!');}
+  lastRideIds=new Set(rides.map(x=>x.id));
+ }catch(e){}
+}
+function renderPedidos(rides){
+ const box=document.getElementById('lista');
+ if(!online){box.innerHTML='<div class="empty"><strong>Você está offline</strong>Ative o online para começar a receber corridas.</div>';return;}
+ if(!rides.length){box.innerHTML='<div class="empty"><strong>Nenhuma corrida no momento</strong>Fique online. Quando surgir um pedido, ele aparecerá aqui.</div>';return;}
+ box.innerHTML=rides.map(c=>`<div class="ride-card"><div class="ride-row"><div class="ride-main"><b>Corrida #${c.id}</b><br>📍 ${esc(c.origem)}<br>🏁 ${esc(c.destino)}<br><span class="ride-muted">💵 ${c.pagamento||'Dinheiro'}</span></div><div class="ride-price">${br(c.valor)}</div></div><div class="ride-actions"><button class="btn-reject" onclick="ignorarPedido(${c.id},this)">IGNORAR</button><button class="btn-accept" onclick="aceitar(${c.id})">ACEITAR</button></div></div>`).join('');
+}
+function esc(v){return String(v??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
+async function aceitar(id){
+ const r=await fetch('/api/corrida/'+id+'/aceitar',{method:'POST'}),d=await r.json();
+ if(!d.ok){toast(d.erro||'Não foi possível aceitar.');return} toast('Corrida aceita! 🏍️');carregar();minhas();
+}
+function ignorarPedido(id,btn){const card=btn.closest('.ride-card');if(card)card.style.display='none';}
+async function minhas(){
+ try{const r=await fetch('/api/motorista/minhas-corridas',{cache:'no-store'}),d=await r.json(); if(!d.ok)return; window._minhas=d.corridas||[]; if(currentView==='historico')renderHistorico(window._minhas);}catch(e){}
+}
+function renderHistorico(cs){
+ const box=document.getElementById('lista');
+ if(!cs.length){box.innerHTML='<div class="empty"><strong>Nenhuma corrida ainda</strong>Suas corridas aparecerão aqui.</div>';return}
+ box.innerHTML=cs.map(c=>`<div class="ride-card"><div class="ride-row"><div class="ride-main"><b>Corrida #${c.id}</b><br>👤 ${esc(c.passageiro_nome||'Passageiro')}<br>📍 ${esc(c.origem)}<br>🏁 ${esc(c.destino)}<br><span class="ride-muted">📌 ${esc(c.status)}</span></div><div class="ride-price">${br(c.valor)}</div></div>${c.status==='ACEITA'?'<div class="ride-actions"><button class="btn-accept" onclick="acao('+c.id+',\'iniciar\')">INICIAR CORRIDA</button></div>':''}${c.status==='EM_ANDAMENTO'?'<div class="ride-actions"><button class="btn-accept" onclick="acao('+c.id+',\'concluir\')">CONCLUIR CORRIDA</button></div>':''}</div>`).join('');
+}
+async function acao(id,a){const r=await fetch('/api/corrida/'+id+'/'+a,{method:'POST'}),d=await r.json();toast(d.ok?'Atualizado!':(d.erro||'Erro'));minhas();ganhos();carregar();}
+async function ganhos(){
+ try{const r=await fetch('/api/motorista/ganhos',{cache:'no-store'}),d=await r.json();if(!d.ok)return;document.getElementById('pillMoney').textContent=br(d.total_hoje);document.getElementById('hojeCorridas').textContent=d.corridas_hoje;document.getElementById('hojeGanhos').textContent=br(d.total_hoje);document.getElementById('totalGanhos').textContent=br(d.total_geral);if(currentView==='ganhos')renderGanhos(d);}catch(e){}
+}
+function renderGanhos(d){document.getElementById('lista').innerHTML='<div class="ride-card"><div class="ride-row"><div><div class="ride-muted">GANHOS DE HOJE</div><div style="font-size:32px;font-weight:900;margin-top:4px">'+br(d.total_hoje)+'</div></div><div style="text-align:right"><div class="ride-muted">CORRIDAS</div><div style="font-size:25px;font-weight:900">'+d.corridas_hoje+'</div></div></div><div style="margin-top:15px;color:#aaa;font-size:13px">Total concluído: <b style="color:#fff">'+br(d.total_geral)+'</b></div></div>';}
+function mostrar(view,el){currentView=view;document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));if(el)el.classList.add('active');if(view==='historico'){minhas();renderHistorico(window._minhas||[]);document.getElementById('sheetTitle').textContent='Histórico de corridas';document.getElementById('sheetSub').textContent='Confira suas corridas e os respectivos valores.'}else if(view==='ganhos'){ganhos();document.getElementById('sheetTitle').textContent='Meus ganhos';document.getElementById('sheetSub').textContent='Acompanhe quanto você ganhou.'}else{document.getElementById('sheetTitle').textContent=online?'Você está online':'Você está offline';document.getElementById('sheetSub').textContent=online?'Aguardando novos pedidos em Aragoiânia.':'Fique online para receber novos pedidos em Aragoiânia.';carregar();}}
+function testarSom(){try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=720;g.gain.value=.07;o.connect(g);g.connect(c.destination);o.start();setTimeout(()=>o.frequency.value=1050,130);setTimeout(()=>{o.stop();c.close()},380)}catch(e){}}
+initMap();status();carregar();minhas();ganhos();setInterval(()=>{status();carregar();minhas();ganhos()},5000);
 </script>
-
-<meta http-equiv="refresh" content="5">
-"""
-
-    return _pagina_publica("Motorista", corpo_motorista, manifesto="motorista")
+</body>
+</html>
+''', nome=nome, inicial=inicial)
 
 
 @app.route("/motorista/aceitar/<int:id>", methods=["POST"])
