@@ -7117,7 +7117,7 @@ Chegue ao seu destino com praticidade.
 👤 CRIAR CONTA DE PASSAGEIRO
 </a>
 
-<a class="btn btn-secundario" href="/login_passageiro">
+<a class="btn btn-secundario" href="/login-passageiro">
 🔐 JÁ TENHO UMA CONTA DE PASSAGEIRO
 </a>
 
