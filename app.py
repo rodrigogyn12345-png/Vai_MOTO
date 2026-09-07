@@ -6345,17 +6345,30 @@ def alerta_sonoro_motorista(response):
         }
       );
 
-      const d = await r.json();
+      const textoResposta = await r.text();
 
-      if(!d.ok){
-        toast(d.erro || "Não foi possível aceitar a corrida.");
-
+      let d;
+      try{
+        d = JSON.parse(textoResposta);
+      }catch(e){
+        console.log("RESPOSTA DO SERVIDOR:", textoResposta);
+        toast("Erro no servidor. HTTP " + r.status);
         if(botao){
           botao.disabled = false;
           botao.textContent = "🟢 ACEITAR CORRIDA";
           botao.style.opacity = "1";
         }
+        return;
+      }
 
+      if(!r.ok || !d.ok){
+        console.log("ERRO AO ACEITAR:", r.status, d);
+        toast(d.erro || ("Erro HTTP " + r.status));
+        if(botao){
+          botao.disabled = false;
+          botao.textContent = "🟢 ACEITAR CORRIDA";
+          botao.style.opacity = "1";
+        }
         return;
       }
 
@@ -6366,27 +6379,32 @@ def alerta_sonoro_motorista(response):
 
       toast("🟢 CORRIDA ACEITA!");
 
-      await minhas();
-      await ganhos();
-
+      /* Mostra a corrida aceita imediatamente.
+         Qualquer erro posterior de atualização não desfaz o aceite. */
       if(d.corrida){
-        window._minhas = window._minhas || [];
+        try{
+          window._minhas = window._minhas || [];
+          window._minhas = [
+            d.corrida,
+            ...window._minhas.filter(x => x.id !== d.corrida.id)
+          ];
 
-        window._minhas = [
-          d.corrida,
-          ...window._minhas.filter(x => x.id !== d.corrida.id)
-        ];
-
-        if(currentView==='pedidos' || currentView==='inicio'){
-          renderPedidos([], [d.corrida]);
+          if(currentView==='pedidos' || currentView==='inicio'){
+            renderPedidos([], [d.corrida]);
+          }
+        }catch(erroTela){
+          console.log("ERRO AO MOSTRAR CORRIDA:", erroTela);
         }
       }
 
-      await carregar();
-      setTimeout(() => carregar(), 800);
+      /* Atualizações secundárias em segundo plano */
+      try{ await minhas(); }catch(e){}
+      try{ await ganhos(); }catch(e){}
+      try{ await carregar(); }catch(e){}
 
     }catch(e){
-      toast("Erro de conexão ao aceitar a corrida.");
+      console.log("ERRO NO ACEITE:", e);
+      toast("Erro ao processar o aceite: " + (e.message || e));
 
       if(botao){
         botao.disabled = false;
