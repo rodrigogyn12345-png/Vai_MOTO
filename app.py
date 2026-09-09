@@ -43,7 +43,7 @@ def conectar():
 
 
 
-def criar_checkout_asaas(corrida_id, valor, origem, destino):
+def criar_checkout_asaas(corrida_id, valor, origem, destino, pagamento='PIX'):
     """
     Cria um Checkout Asaas para uma corrida.
     Retorna (checkout_id, checkout_url, erro).
@@ -53,7 +53,11 @@ def criar_checkout_asaas(corrida_id, valor, origem, destino):
 
     try:
         payload = {
-            "billingTypes": ["PIX", "CREDIT_CARD"],
+            "billingTypes": (
+                ["CREDIT_CARD"]
+                if str(pagamento).upper() == "CARTAO"
+                else ["PIX"]
+            ),
             "chargeTypes": ["DETACHED"],
             "minutesToExpire": 60,
             "externalReference": f"corrida-{corrida_id}",
@@ -3140,8 +3144,8 @@ async function usarMinhaLocalizacao(){
         <div id="estimativa" class="pub-info" style="display:none"></div>
 
         <label class="pub-label">Pagamento</label>
-        <select id="pagamento" class="pub-input">
-          <option value="DINHEIRO">💵 Dinheiro</option>
+        <select id="pagamento" class="pub-input" onchange="atualizarBotaoPagamento()">
+          <option value="DINHEIRO">💰 Dinheiro</option>
           <option value="PIX">🔑 PIX</option>
           <option value="CARTAO">💳 Cartão</option>
         </select>
@@ -3225,41 +3229,190 @@ async function calcular(){
     msg("Erro ao calcular a corrida. Tente novamente.","erro");
   }
 }
-async function solicitar(){
-  if(!window._corrida){msg("Calcule a corrida primeiro.","erro");return;}
-  const body={
-    origem:document.getElementById("origem").value,
-    destino:document.getElementById("destino").value,
-    origem_lat:document.getElementById("origem_lat").value,
-    origem_lon:document.getElementById("origem_lon").value,
-    dest_lat:document.getElementById("dest_lat").value,
-    dest_lon:document.getElementById("dest_lon").value,
-    pagamento:document.getElementById("pagamento").value,
-    distancia_km:window._corrida.distancia_km,
-    valor:window._corrida.valor,
-    taxa_app:window._corrida.taxa_app,
-    valor_motorista:window._corrida.valor_motorista
-  };
-  const r=await fetch("/api/solicitar-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
-  const d=await r.json();
-  if(!d.ok){msg(d.erro||"Erro ao solicitar corrida.","erro");return;}
-  document.getElementById("solicitar").style.display="none";
+function atualizarBotaoPagamento(){
+  const botao = document.getElementById("solicitar");
+  const pagamento = document.getElementById("pagamento");
 
-  if(d.checkout_url){
-    msg(
-      'Corrida criada!<br><br>' +
-      '<a href="' + d.checkout_url + '" target="_blank" ' +
-      'class="pub-btn pub-green" style="display:block;text-align:center;text-decoration:none">' +
-      '💳 PAGAR COM PIX / CARTÃO' +
-      '</a>',
-      "sucesso"
-    );
+  if(!botao || !pagamento) return;
+
+  if(pagamento.value === "DINHEIRO"){
+    botao.textContent = "🏍️ SOLICITAR CORRIDA";
   }else{
-    msg("Corrida solicitada! Aguarde um motorista.","sucesso");
+    botao.textContent = "💳 PAGAR CORRIDA";
+  }
+}
+
+
+
+async function solicitar(){
+  if(!window._corrida){
+    msg("Calcule a corrida primeiro.","erro");
+    return;
   }
 
-  carregarCorridas();
+  const pagamento =
+    document.getElementById("pagamento").value;
+
+  if(!["DINHEIRO","PIX","CARTAO"].includes(pagamento)){
+    msg("Escolha Dinheiro, PIX ou Cartão.","erro");
+    return;
+  }
+
+  const botao =
+    document.getElementById("solicitar");
+
+  if(botao){
+    botao.disabled = true;
+    botao.style.opacity = "0.65";
+
+    botao.textContent =
+      pagamento === "DINHEIRO"
+        ? "⏳ SOLICITANDO..."
+        : "⏳ CRIANDO PAGAMENTO...";
+  }
+
+  const body = {
+    origem:
+      document.getElementById("origem").value,
+
+    destino:
+      document.getElementById("destino").value,
+
+    origem_lat:
+      document.getElementById("origem_lat").value,
+
+    origem_lon:
+      document.getElementById("origem_lon").value,
+
+    dest_lat:
+      document.getElementById("dest_lat").value,
+
+    dest_lon:
+      document.getElementById("dest_lon").value,
+
+    pagamento: pagamento,
+
+    distancia_km:
+      window._corrida.distancia_km,
+
+    valor:
+      window._corrida.valor,
+
+    taxa_app:
+      window._corrida.taxa_app,
+
+    valor_motorista:
+      window._corrida.valor_motorista
+  };
+
+  try{
+
+    const r = await fetch(
+      "/api/solicitar-corrida",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json"
+        },
+        credentials:"same-origin",
+        body:JSON.stringify(body)
+      }
+    );
+
+    const d = await r.json();
+
+    if(!d.ok){
+
+      msg(
+        d.erro || "Erro ao solicitar corrida.",
+        "erro"
+      );
+
+      if(botao){
+        botao.disabled = false;
+        botao.style.opacity = "1";
+        atualizarBotaoPagamento();
+      }
+
+      return;
+    }
+
+    if(d.pagamento === "DINHEIRO"){
+
+      if(botao){
+        botao.style.display = "none";
+      }
+
+      msg(
+        "🏍️ Corrida solicitada!<br><br>" +
+        "Estamos procurando um motorista para você.",
+        "sucesso"
+      );
+
+    }else{
+
+      if(d.checkout_url){
+
+        if(botao){
+          botao.style.display = "none";
+        }
+
+        msg(
+          '<div style="text-align:center">' +
+          '<div style="font-size:32px">🔐</div>' +
+          '<b>PAGAMENTO NECESSÁRIO</b>' +
+          '<br><br>' +
+          'Sua corrida ainda NÃO foi liberada para os motoristas.' +
+          '<br><br>' +
+          '<a href="' + d.checkout_url + '" ' +
+          'target="_blank" ' +
+          'rel="noopener noreferrer" ' +
+          'class="pub-btn pub-green" ' +
+          'style="display:block;text-align:center;text-decoration:none">' +
+          '💳 PAGAR AGORA' +
+          '</a>' +
+          '<div style="font-size:12px;margin-top:10px;color:#666">' +
+          'Após o pagamento confirmado, a corrida será liberada automaticamente.' +
+          '</div>' +
+          '</div>',
+          "sucesso"
+        );
+
+      }else{
+
+        msg(
+          "Não foi possível gerar o pagamento.",
+          "erro"
+        );
+
+        if(botao){
+          botao.disabled = false;
+          botao.style.opacity = "1";
+          atualizarBotaoPagamento();
+        }
+
+        return;
+      }
+    }
+
+    carregarCorridas();
+  }catch(e){
+
+    console.error(e);
+
+    msg(
+      "Erro de conexão. Tente novamente.",
+      "erro"
+    );
+
+    if(botao){
+      botao.disabled = false;
+      botao.style.opacity = "1";
+      atualizarBotaoPagamento();
+    }
+  }
 }
+
   async function carregarCorridas(){
     try{
       const r = await fetch("/api/minhas-corridas", {
@@ -3299,7 +3452,7 @@ async function solicitar(){
         if(status === "AGUARDANDO_PAGAMENTO"){
           return {
             titulo:"AGUARDANDO PAGAMENTO",
-            texto:"Finalize o pagamento para liberarmos a chamada do motorista.",
+            texto:"Finalize o pagamento para liberar a corrida aos motoristas.",
             emoji:"💳",
             progresso:10
           };
@@ -3308,7 +3461,7 @@ async function solicitar(){
         if(status === "PENDENTE"){
           return {
             titulo:"PROCURANDO MOTORISTA",
-            texto:"Pagamento confirmado. Estamos procurando um motorista disponível.",
+            texto:"Estamos procurando um motorista disponível.",
             emoji:"🔎",
             progresso:20
           };
@@ -5290,90 +5443,238 @@ def api_calcular_corrida():
 @app.route("/api/solicitar-corrida", methods=["POST"])
 def api_solicitar_corrida():
     pid = _passageiro_logado()
+
     if not pid:
-        return {"ok": False, "erro": "Faça login como passageiro."}, 401
+        return {
+            "ok": False,
+            "erro": "Faça login como passageiro."
+        }, 401
 
     data = _json()
+
     origem = (data.get("origem") or "").strip()
     destino = (data.get("destino") or "").strip()
-    pagamento = (data.get("pagamento") or "DINHEIRO").upper()
+
+    pagamento = (
+        data.get("pagamento")
+        or "DINHEIRO"
+    ).upper().strip()
+
+    # Novas corridas aceitam DINHEIRO, PIX ou CARTÃO.
+    if pagamento not in ("DINHEIRO", "PIX", "CARTAO"):
+        return {
+            "ok": False,
+            "erro": "Escolha Dinheiro, PIX ou Cartão."
+        }, 400
+
     try:
-        distancia = float(data.get("distancia_km") or 0)
-        valor = round(float(data.get("valor") or 0), 2)
+        distancia = float(
+            data.get("distancia_km") or 0
+        )
+        valor = round(
+            float(data.get("valor") or 0),
+            2
+        )
     except Exception:
-        distancia, valor = 0, 0
+        distancia = 0
+        valor = 0
 
     if not origem or not destino or distancia <= 0 or valor <= 0:
-        return {"ok": False, "erro": "Origem, destino e valor são obrigatórios."}
-    if pagamento not in ("DINHEIRO", "PIX", "CARTAO"):
-        pagamento = "DINHEIRO"
+        return {
+            "ok": False,
+            "erro": "Origem, destino e valor são obrigatórios."
+        }, 400
 
-    taxa = round(valor * TAXA_APP, 2)
-    valor_motorista = round(valor - taxa, 2)
+    taxa = round(
+        valor * TAXA_APP,
+        2
+    )
 
-    # Dinheiro chama o motorista imediatamente.
-    # PIX/cartão só liberam a corrida depois da confirmação do pagamento.
+    valor_motorista = round(
+        valor - taxa,
+        2
+    )
+
+    # ========================================================
+    # DINHEIRO
+    # ========================================================
+    # Dinheiro continua funcionando como antes:
+    # a corrida fica PENDENTE imediatamente.
     if pagamento == "DINHEIRO":
-        status_corrida = "PENDENTE"
-        pagamento_status = "NAO_APLICAVEL"
-    else:
-        status_corrida = "AGUARDANDO_PAGAMENTO"
-        pagamento_status = "AGUARDANDO_PAGAMENTO"
-
-    conn = conectar()
-    cur = conn.execute("""
-        INSERT INTO corridas_vai
-        (passageiro_id, motorista_id, origem, destino, valor, status, observacao,
-         pagamento, pagamento_status, pix_chave, distancia_km, taxa_app, valor_motorista)
-        VALUES (?, NULL, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
-    """, (pid, origem, destino, valor, status_corrida, pagamento,
-          pagamento_status, PIX_ADMIN, distancia, taxa, valor_motorista))
-    conn.commit()
-    corrida_id = cur.lastrowid
-    conn.close()
-
-    # =========================================================
-    # ASAAS - cria Checkout para pagamento online
-    # =========================================================
-    checkout_url = ""
-
-    if pagamento in ("PIX", "CARTAO"):
-        checkout_id, checkout_url, erro_asaas = criar_checkout_asaas(
-            corrida_id,
-            valor,
-            origem,
-            destino
-        )
-
-        if erro_asaas:
-            # Não deixa uma corrida PIX criada sem Checkout.
-            conn = conectar()
-            conn.execute(
-                "DELETE FROM corridas_vai WHERE id=? AND passageiro_id=?",
-                (corrida_id, pid)
-            )
-            conn.commit()
-            conn.close()
-
-            return {
-                "ok": False,
-                "erro": erro_asaas
-            }
 
         conn = conectar()
-        conn.execute("""
-            UPDATE corridas_vai
-            SET asaas_checkout_id=?,
-                asaas_checkout_url=?
-            WHERE id=? AND passageiro_id=?
+
+        cur = conn.execute("""
+            INSERT INTO corridas_vai
+            (
+                passageiro_id,
+                motorista_id,
+                origem,
+                destino,
+                valor,
+                status,
+                observacao,
+                pagamento,
+                pagamento_status,
+                pix_chave,
+                distancia_km,
+                taxa_app,
+                valor_motorista
+            )
+            VALUES (
+                ?,
+                NULL,
+                ?,
+                ?,
+                ?,
+                'PENDENTE',
+                '',
+                'DINHEIRO',
+                'NAO_APLICAVEL',
+                ?,
+                ?,
+                ?,
+                ?
+            )
         """, (
-            checkout_id,
-            checkout_url,
+            pid,
+            origem,
+            destino,
+            valor,
+            PIX_ADMIN,
+            distancia,
+            taxa,
+            valor_motorista
+        ))
+
+        conn.commit()
+
+        corrida_id = cur.lastrowid
+
+        conn.close()
+
+        return {
+            "ok": True,
+            "id": corrida_id,
+            "valor": valor,
+            "taxa_app": taxa,
+            "valor_motorista": valor_motorista,
+            "pagamento": "DINHEIRO",
+            "pagamento_status": "NAO_APLICAVEL",
+            "status": "PENDENTE",
+            "checkout_url": ""
+        }
+
+
+    # ========================================================
+    # PIX / CARTAO
+    # ========================================================
+    # A corrida NÃO fica disponível ao motorista ainda.
+    conn = conectar()
+
+    cur = conn.execute("""
+        INSERT INTO corridas_vai
+        (
+            passageiro_id,
+            motorista_id,
+            origem,
+            destino,
+            valor,
+            status,
+            observacao,
+            pagamento,
+            pagamento_status,
+            pix_chave,
+            distancia_km,
+            taxa_app,
+            valor_motorista
+        )
+        VALUES (
+            ?,
+            NULL,
+            ?,
+            ?,
+            ?,
+            'AGUARDANDO_PAGAMENTO',
+            '',
+            ?,
+            'PENDENTE',
+            ?,
+            ?,
+            ?,
+            ?
+        )
+    """, (
+        pid,
+        origem,
+        destino,
+        valor,
+        pagamento,
+        PIX_ADMIN,
+        distancia,
+        taxa,
+        valor_motorista
+    ))
+
+    conn.commit()
+
+    corrida_id = cur.lastrowid
+
+    conn.close()
+
+    # Cria o Checkout específico:
+    # PIX -> somente PIX
+    # CARTAO -> somente cartão
+    checkout_id, checkout_url, erro_asaas = criar_checkout_asaas(
+        corrida_id,
+        valor,
+        origem,
+        destino,
+        pagamento
+    )
+
+    if erro_asaas:
+
+        # Remove somente a corrida que acabou de ser criada
+        # e que ainda está aguardando pagamento.
+        conn = conectar()
+
+        conn.execute("""
+            DELETE FROM corridas_vai
+            WHERE id=?
+              AND passageiro_id=?
+              AND status='AGUARDANDO_PAGAMENTO'
+        """, (
             corrida_id,
             pid
         ))
+
         conn.commit()
         conn.close()
+
+        return {
+            "ok": False,
+            "erro": erro_asaas
+        }, 500
+
+    conn = conectar()
+
+    conn.execute("""
+        UPDATE corridas_vai
+        SET
+            asaas_checkout_id=?,
+            asaas_checkout_url=?
+        WHERE id=?
+          AND passageiro_id=?
+    """, (
+        checkout_id,
+        checkout_url,
+        corrida_id,
+        pid
+    ))
+
+    conn.commit()
+    conn.close()
 
     return {
         "ok": True,
@@ -5382,9 +5683,11 @@ def api_solicitar_corrida():
         "taxa_app": taxa,
         "valor_motorista": valor_motorista,
         "pagamento": pagamento,
-        "pagamento_status": pagamento_status,
+        "pagamento_status": "PENDENTE",
+        "status": "AGUARDANDO_PAGAMENTO",
         "checkout_url": checkout_url
     }
+
 
 
 @app.route("/api/minhas-corridas")
@@ -5413,7 +5716,7 @@ def api_cancelar_corrida(id):
     conn = conectar()
     cur = conn.execute("""
         UPDATE corridas_vai SET status='CANCELADA', cancelado_em=CURRENT_TIMESTAMP
-        WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','AGUARDANDO_PAGAMENTO','ACEITA')
+        WHERE id=? AND passageiro_id=? AND status IN ('PENDENTE','ACEITA')
     """, (id, pid))
     conn.commit()
     conn.close()
@@ -5511,9 +5814,7 @@ def api_corridas_disponiveis():
     rows = conn.execute("""
         SELECT c.id,c.origem,c.destino,c.valor,c.status,c.pagamento,c.distancia_km,c.criado_em
         FROM corridas_vai c
-        WHERE c.status='PENDENTE'
-          AND c.motorista_id IS NULL
-          AND c.pagamento_status IN ('NAO_APLICAVEL','PAGO')
+        WHERE c.status='PENDENTE' AND c.motorista_id IS NULL
         ORDER BY c.id DESC LIMIT 20
     """).fetchall()
     conn.close()
@@ -6496,15 +6797,16 @@ def asaas_webhook():
 
     if corrida:
         if evento == "CHECKOUT_PAID":
-            # Pagamento confirmado pelo Asaas:
-            # libera a corrida para os motoristas.
             conn.execute("""
                 UPDATE corridas_vai
-                SET pagamento_status='PAGO',
-                    status='PENDENTE'
+                SET
+                    pagamento_status='PAGO',
+                    status=CASE
+                        WHEN status='AGUARDANDO_PAGAMENTO'
+                        THEN 'PENDENTE'
+                        ELSE status
+                    END
                 WHERE id=?
-                  AND pagamento IN ('PIX','CARTAO')
-                  AND status='AGUARDANDO_PAGAMENTO'
             """, (corrida["id"],))
 
         elif evento == "CHECKOUT_CANCELED":
@@ -7044,126 +7346,6 @@ def alerta_sonoro_motorista(response):
         pass
 
     return response
-
-
-@app.route("/anuncio-passageiro")
-def anuncio_passageiro():
-    return """
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="robots" content="noindex">
-<title>VAI_DE_MOTO - Aragoiânia</title>
-<style>
-*{box-sizing:border-box}
-body{
-    margin:0;
-    font-family:Arial,Helvetica,sans-serif;
-    background:#f5f5f5;
-    color:#111;
-}
-.container{
-    max-width:520px;
-    margin:0 auto;
-    padding:22px 16px 35px;
-}
-.card{
-    background:#fff;
-    border-radius:18px;
-    padding:28px 20px;
-    text-align:center;
-    box-shadow:0 3px 15px rgba(0,0,0,.10);
-}
-.logo{
-    font-size:32px;
-    font-weight:800;
-    margin-bottom:5px;
-}
-.local{
-    color:#555;
-    font-size:16px;
-    margin-bottom:25px;
-}
-h1{
-    font-size:27px;
-    line-height:1.2;
-    margin:10px 0 12px;
-}
-.texto{
-    font-size:17px;
-    line-height:1.5;
-    color:#444;
-    margin-bottom:24px;
-}
-.btn{
-    display:block;
-    width:100%;
-    padding:17px 12px;
-    margin:12px 0;
-    border-radius:11px;
-    text-decoration:none;
-    font-size:17px;
-    font-weight:bold;
-}
-.btn-principal{
-    background:#168a3d;
-    color:#fff;
-}
-.btn-secundario{
-    background:#111;
-    color:#fff;
-}
-.info{
-    margin-top:22px;
-    font-size:14px;
-    line-height:1.5;
-    color:#666;
-}
-</style>
-</head>
-<body>
-<div class="container">
-<div class="card">
-
-<div class="logo">🏍️ VAI_DE_MOTO</div>
-<div class="local">📍 Aragoiânia - GO</div>
-
-<h1>Sua corrida rápida e segura!</h1>
-
-<div class="texto">
-Chegue ao seu destino com praticidade.
-<br><br>
-<strong>Peça sua corrida pelo VAI_DE_MOTO.</strong>
-</div>
-
-<a class="btn btn-principal" href="/cadastro/passageiro">
-👤 CRIAR CONTA DE PASSAGEIRO
-</a>
-
-<a class="btn btn-secundario" href="/login-passageiro">
-🔐 JÁ TENHO UMA CONTA DE PASSAGEIRO
-</a>
-
-<a class="btn btn-principal" href="/cadastro/motorista">
-🏍️ QUERO SER MOTORISTA
-</a>
-
-<a class="btn btn-secundario" href="/login-motorista">
-🏍️ ENTRAR COMO MOTORISTA
-</a>
-
-<div class="info">
-VAI_DE_MOTO<br>
-Mobilidade rápida e local em Aragoiânia.
-</div>
-
-</div>
-</div>
-</body>
-</html>
-"""
 
 if __name__ == "__main__":
     iniciar_banco()
