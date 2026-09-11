@@ -212,6 +212,14 @@ def iniciar_banco():
         conn.execute("ALTER TABLE motoqueiros ADD COLUMN senha TEXT DEFAULT ''")
     except Exception:
         pass
+    try:
+        conn.execute("ALTER TABLE motoqueiros ADD COLUMN latitude REAL")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE motoqueiros ADD COLUMN longitude REAL")
+    except Exception:
+        pass
 
     # Documentos do motorista
     for coluna in (
