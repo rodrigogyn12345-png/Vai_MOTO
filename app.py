@@ -653,6 +653,7 @@ textarea {
     <a href="{{ url_for('motoqueiros') }}">🏍️ Motoqueiros</a>
     <a href="{{ url_for("passageiros") }}">👥 Passageiros</a>
     <a href="/corridas">🚕 Corridas</a>
+    <a href="{{ url_for('admin_avaliacoes') }}">⭐ Avaliações</a>
     <a href="{{ url_for('logout') }}">🚪 Sair</a>
 </div>
 {% endif %}
@@ -1407,6 +1408,326 @@ def excluir_motoqueiro(id):
 # ADMIN - CORRIDAS
 # ============================================================
 
+
+
+@app.route("/admin/avaliacoes")
+@login_obrigatorio
+def admin_avaliacoes():
+    conn = conectar()
+
+    # Resumo geral das avaliações
+    resumo = conn.execute("""
+        SELECT
+            COUNT(*) AS total_avaliacoes,
+            COALESCE(AVG(avaliacao_nota), 0) AS media
+        FROM corridas_vai
+        WHERE avaliacao_nota IS NOT NULL
+          AND status='CONCLUIDA'
+    """).fetchone()
+
+    # Resumo por motorista
+    motoristas = conn.execute("""
+        SELECT
+            m.id,
+            m.nome,
+            m.telefone,
+            COUNT(c.id) AS quantidade,
+            COALESCE(AVG(c.avaliacao_nota), 0) AS media
+        FROM motoqueiros m
+        LEFT JOIN corridas_vai c
+            ON c.motorista_id = m.id
+           AND c.avaliacao_nota IS NOT NULL
+           AND c.status='CONCLUIDA'
+        GROUP BY m.id, m.nome, m.telefone
+        HAVING COUNT(c.id) > 0
+        ORDER BY media DESC, quantidade DESC, m.nome ASC
+    """).fetchall()
+
+    # Lista das avaliações
+    avaliacoes = conn.execute("""
+        SELECT
+            c.id,
+            c.avaliacao_nota,
+            c.avaliacao_comentario,
+            c.avaliado_em,
+            c.valor,
+            p.nome AS passageiro_nome,
+            m.nome AS motorista_nome
+        FROM corridas_vai c
+        LEFT JOIN passageiros p
+            ON p.id = c.passageiro_id
+        LEFT JOIN motoqueiros m
+            ON m.id = c.motorista_id
+        WHERE c.avaliacao_nota IS NOT NULL
+          AND c.status='CONCLUIDA'
+        ORDER BY c.avaliado_em DESC, c.id DESC
+        LIMIT 200
+    """).fetchall()
+
+    conn.close()
+
+    total = int(resumo["total_avaliacoes"] or 0)
+    media = float(resumo["media"] or 0)
+
+    def estrelas(nota):
+        n = int(nota or 0)
+        return "★" * n + "☆" * (5 - n)
+
+    def esc(valor):
+        if valor is None:
+            return ""
+        return (
+            str(valor)
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )
+
+    cards_motoristas = ""
+
+    if motoristas:
+        for m in motoristas:
+            media_m = float(m["media"] or 0)
+            qtd = int(m["quantidade"] or 0)
+
+            cards_motoristas += f"""
+            <div class="card" style="
+                margin-bottom:14px;
+                border-left:5px solid #ff9d00;
+            ">
+                <div style="
+                    display:flex;
+                    justify-content:space-between;
+                    align-items:center;
+                    gap:15px;
+                    flex-wrap:wrap;
+                ">
+                    <div>
+                        <div style="
+                            font-size:19px;
+                            font-weight:900;
+                        ">
+                            🏍️ {esc(m["nome"])}
+                        </div>
+
+                        <div style="
+                            color:#777;
+                            margin-top:4px;
+                            font-size:13px;
+                        ">
+                            {esc(m["telefone"] or "")}
+                        </div>
+                    </div>
+
+                    <div style="text-align:right">
+                        <div style="
+                            color:#ff9d00;
+                            font-size:25px;
+                            letter-spacing:2px;
+                            font-weight:900;
+                        ">
+                            {estrelas(round(media_m))}
+                        </div>
+
+                        <div style="
+                            font-size:15px;
+                            font-weight:900;
+                            margin-top:2px;
+                        ">
+                            ⭐ {media_m:.2f} / 5
+                        </div>
+
+                        <div style="
+                            font-size:11px;
+                            color:#777;
+                            margin-top:3px;
+                        ">
+                            {qtd} avaliação(ões)
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
+    else:
+        cards_motoristas = """
+        <div class="card" style="text-align:center;padding:35px;">
+            <div style="font-size:45px;">⭐</div>
+            <h3>Nenhuma avaliação ainda</h3>
+            <p style="color:#777;">
+                As avaliações aparecerão aqui depois que os passageiros
+                avaliarem corridas concluídas.
+            </p>
+        </div>
+        """
+
+    cards_avaliacoes = ""
+
+    if avaliacoes:
+        for a in avaliacoes:
+            nota = int(a["avaliacao_nota"] or 0)
+            comentario = esc(a["avaliacao_comentario"] or "").strip()
+
+            if not comentario:
+                comentario = "<span style='color:#999;'>Sem comentário.</span>"
+
+            cards_avaliacoes += f"""
+            <div class="card" style="
+                margin-bottom:14px;
+                border-radius:18px;
+            ">
+                <div style="
+                    display:flex;
+                    justify-content:space-between;
+                    gap:10px;
+                    flex-wrap:wrap;
+                ">
+                    <div>
+                        <strong style="font-size:16px;">
+                            ⭐ {estrelas(nota)}
+                        </strong>
+
+                        <div style="
+                            margin-top:6px;
+                            font-size:13px;
+                            color:#666;
+                        ">
+                            🏍️ <b>Motorista:</b>
+                            {esc(a["motorista_nome"] or "Não informado")}
+                        </div>
+
+                        <div style="
+                            margin-top:4px;
+                            font-size:13px;
+                            color:#666;
+                        ">
+                            👤 <b>Passageiro:</b>
+                            {esc(a["passageiro_nome"] or "Não informado")}
+                        </div>
+                    </div>
+
+                    <div style="
+                        text-align:right;
+                        font-size:12px;
+                        color:#888;
+                    ">
+                        <b>Corrida #{a["id"]}</b><br>
+                        {esc(a["avaliado_em"] or "")}
+                    </div>
+                </div>
+
+                <div style="
+                    margin-top:13px;
+                    padding:13px;
+                    background:#f8f8f8;
+                    border-radius:13px;
+                    line-height:1.5;
+                    font-size:13px;
+                ">
+                    💬 {comentario}
+                </div>
+
+                <div style="
+                    margin-top:10px;
+                    font-size:13px;
+                    color:#666;
+                ">
+                    💰 Corrida:
+                    <b>R$ {float(a["valor"] or 0):.2f}</b>
+                </div>
+            </div>
+            """
+    else:
+        cards_avaliacoes = """
+        <div class="card" style="text-align:center;padding:35px;">
+            <div style="font-size:45px;">📝</div>
+            <h3>Sem avaliações registradas</h3>
+        </div>
+        """
+
+    html = f"""
+    <div style="
+        display:flex;
+        align-items:center;
+        gap:15px;
+        margin-bottom:25px;
+        flex-wrap:wrap;
+    ">
+        <img src="/icone/logo-vai-de-moto.png"
+             style="
+                width:75px;
+                height:75px;
+                object-fit:contain;
+                border-radius:18px;
+             "
+             alt="VAI_DE_MOTO">
+
+        <div>
+            <h1 style="margin:0;">
+                ⭐ AVALIAÇÕES
+            </h1>
+
+            <div style="
+                color:#666;
+                margin-top:4px;
+                font-size:16px;
+            ">
+                Opiniões dos passageiros sobre os motoristas
+            </div>
+        </div>
+    </div>
+
+    <div class="grid">
+
+        <div class="stat">
+            <div class="titulo">⭐ Avaliações</div>
+            <div class="numero">{total}</div>
+        </div>
+
+        <div class="stat">
+            <div class="titulo">⭐ Média geral</div>
+            <div class="numero">{media:.2f}</div>
+        </div>
+
+        <div class="stat">
+            <div class="titulo">🏍️ Motoristas avaliados</div>
+            <div class="numero">{len(motoristas)}</div>
+        </div>
+
+    </div>
+
+    <div class="card" style="
+        margin-top:20px;
+        background:linear-gradient(135deg,#111,#292929);
+        color:white;
+        border-radius:22px;
+    ">
+        <h2 style="margin-top:0;">
+            🏆 Ranking dos motoristas
+        </h2>
+
+        <p style="color:#ccc;">
+            Média baseada somente nas corridas concluídas
+            que receberam avaliação.
+        </p>
+
+        {cards_motoristas}
+    </div>
+
+    <div style="margin-top:25px;">
+        <h2>📝 Avaliações recebidas</h2>
+        {cards_avaliacoes}
+    </div>
+
+    <div style="margin-top:20px;">
+        <a class="btn btn-azul"
+           href="{url_for('dashboard')}">
+            ⬅️ VOLTAR AO PAINEL
+        </a>
+    </div>
+    """
+
+    return pagina(html)
 
 @app.route("/financeiro", methods=["GET", "POST"])
 @login_obrigatorio
