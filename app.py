@@ -261,6 +261,23 @@ def iniciar_banco():
     except Exception:
         pass
 
+    # Avaliação do motorista pelo passageiro
+    # Migrações seguras: se a coluna já existir, simplesmente ignora.
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN avaliacao_nota INTEGER")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN avaliacao_comentario TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN avaliado_em TIMESTAMP")
+    except Exception:
+        pass
+
     # Corrige a senha do motorista de teste, se ele existir.
     motorista_teste = conn.execute(
         "SELECT id, senha FROM motoqueiros WHERE telefone = ?",
@@ -3022,6 +3039,46 @@ def passageiro():
     return _pagina_publica("Passageiro", """
 
 <style>
+/* ===== PAINEL DO PASSAGEIRO - VISUAL PROFISSIONAL ===== */
+.pub-card{
+    border-radius:24px !important;
+    border:1px solid #e8e8e8 !important;
+    box-shadow:0 8px 28px rgba(0,0,0,.10) !important;
+    overflow:hidden;
+}
+
+.pub-input{
+    border-radius:15px !important;
+    border:1px solid #ddd !important;
+    background:#fff !important;
+    min-height:54px;
+}
+
+.pub-btn{
+    border-radius:15px !important;
+    font-weight:900 !important;
+    letter-spacing:.1px;
+    transition:transform .15s ease, opacity .15s ease;
+}
+
+.pub-btn:active{
+    transform:scale(.98);
+}
+
+.pub-price{
+    font-size:30px !important;
+    font-weight:900 !important;
+    margin:8px 0;
+}
+
+#corridas{
+    margin-top:18px !important;
+}
+
+#lista-corridas{
+    margin-top:8px;
+}
+
 /* ===== PAINEL DO PASSAGEIRO - LETRAS MAIORES ===== */
 .pub-nav a {
     font-size:20px !important;
@@ -3796,59 +3853,478 @@ async function solicitar(){
         `;
       }
 
+      function estrelasHtml(nota){
+        const n = Number(nota || 0);
+        let html = "";
+
+        for(let i = 1; i <= 5; i++){
+          html += i <= n ? "★" : "☆";
+        }
+
+        return html;
+      }
+
+      window.avaliarMotorista = async function(id){
+        const modalAntigo = document.getElementById("modal-avaliacao");
+        if(modalAntigo) modalAntigo.remove();
+
+        const modal = document.createElement("div");
+
+        modal.id = "modal-avaliacao";
+
+        modal.style.cssText =
+          "position:fixed;" +
+          "inset:0;" +
+          "z-index:999999;" +
+          "background:rgba(0,0,0,.72);" +
+          "display:flex;" +
+          "align-items:flex-end;" +
+          "justify-content:center;" +
+          "padding:12px;";
+
+        modal.innerHTML = `
+          <div style="
+            width:100%;
+            max-width:520px;
+            background:#fff;
+            color:#111;
+            border-radius:28px;
+            padding:22px;
+            box-shadow:0 20px 60px rgba(0,0,0,.45);
+          ">
+
+            <div style="
+              text-align:center;
+              font-size:12px;
+              color:#888;
+              font-weight:900;
+              letter-spacing:.5px;
+            ">
+              SUA OPINIÃO É IMPORTANTE
+            </div>
+
+            <div style="
+              text-align:center;
+              font-size:24px;
+              font-weight:900;
+              margin-top:6px;
+            ">
+              ⭐ Avalie seu motorista
+            </div>
+
+            <div style="
+              text-align:center;
+              color:#666;
+              font-size:13px;
+              margin-top:6px;
+            ">
+              Como foi sua experiência com a corrida?
+            </div>
+
+            <div id="estrelas-avaliacao" style="
+              display:flex;
+              justify-content:center;
+              gap:5px;
+              margin:20px 0 8px;
+            ">
+              ${[1,2,3,4,5].map(i => `
+                <button
+                  type="button"
+                  data-nota="${i}"
+                  style="
+                    border:0;
+                    background:transparent;
+                    font-size:43px;
+                    line-height:1;
+                    color:#bbb;
+                    padding:4px;
+                    cursor:pointer;
+                  "
+                >☆</button>
+              `).join("")}
+            </div>
+
+            <div id="texto-nota" style="
+              text-align:center;
+              font-size:13px;
+              font-weight:800;
+              color:#777;
+              min-height:20px;
+            ">
+              Toque nas estrelas
+            </div>
+
+            <textarea
+              id="comentario-avaliacao"
+              maxlength="500"
+              placeholder="Comentário opcional..."
+              style="
+                width:100%;
+                min-height:90px;
+                margin-top:16px;
+                padding:14px;
+                border:1px solid #ddd;
+                border-radius:16px;
+                resize:none;
+                font-size:15px;
+                font-family:Arial,Helvetica,sans-serif;
+                box-sizing:border-box;
+                outline:none;
+              "
+            ></textarea>
+
+            <button
+              id="enviar-avaliacao"
+              type="button"
+              disabled
+              style="
+                width:100%;
+                margin-top:12px;
+                padding:15px;
+                border:0;
+                border-radius:16px;
+                background:#087f23;
+                color:#fff;
+                font-size:16px;
+                font-weight:900;
+                opacity:.5;
+              "
+            >
+              ⭐ ENVIAR AVALIAÇÃO
+            </button>
+
+            <button
+              type="button"
+              id="fechar-avaliacao"
+              style="
+                width:100%;
+                margin-top:8px;
+                padding:13px;
+                border:0;
+                border-radius:15px;
+                background:#f1f1f1;
+                color:#555;
+                font-weight:800;
+              "
+            >
+              FECHAR
+            </button>
+
+          </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        let notaSelecionada = 0;
+
+        const botoesEstrela =
+          modal.querySelectorAll("[data-nota]");
+
+        const textoNota =
+          modal.querySelector("#texto-nota");
+
+        const enviar =
+          modal.querySelector("#enviar-avaliacao");
+
+        const comentario =
+          modal.querySelector("#comentario-avaliacao");
+
+        const textos = {
+          1:"Muito ruim",
+          2:"Ruim",
+          3:"Regular",
+          4:"Muito bom",
+          5:"Excelente!"
+        };
+
+        botoesEstrela.forEach(btn => {
+          btn.addEventListener("click", function(){
+
+            notaSelecionada =
+              Number(this.dataset.nota);
+
+            botoesEstrela.forEach(b => {
+              const valor =
+                Number(b.dataset.nota);
+
+              b.textContent =
+                valor <= notaSelecionada
+                  ? "★"
+                  : "☆";
+
+              b.style.color =
+                valor <= notaSelecionada
+                  ? "#ff9d00"
+                  : "#bbb";
+            });
+
+            textoNota.textContent =
+              textos[notaSelecionada];
+
+            enviar.disabled = false;
+            enviar.style.opacity = "1";
+          });
+        });
+
+        modal.querySelector("#fechar-avaliacao")
+          .addEventListener("click", function(){
+            modal.remove();
+          });
+
+        enviar.addEventListener("click", async function(){
+
+          if(!notaSelecionada){
+            alert("Escolha de 1 a 5 estrelas.");
+            return;
+          }
+
+          enviar.disabled = true;
+          enviar.textContent = "⏳ ENVIANDO...";
+
+          try{
+
+            const r = await fetch(
+              "/api/corrida/" + id + "/avaliar",
+              {
+                method:"POST",
+                headers:{
+                  "Content-Type":"application/json"
+                },
+                credentials:"same-origin",
+                body:JSON.stringify({
+                  nota:notaSelecionada,
+                  comentario:comentario.value.trim()
+                })
+              }
+            );
+
+            const d = await r.json();
+
+            if(!d.ok){
+              alert(
+                d.erro ||
+                "Não foi possível enviar a avaliação."
+              );
+
+              enviar.disabled = false;
+              enviar.textContent =
+                "⭐ ENVIAR AVALIAÇÃO";
+
+              return;
+            }
+
+            modal.remove();
+
+            msg(
+              "⭐ Avaliação enviada com sucesso! Obrigado pela sua opinião.",
+              "sucesso"
+            );
+
+            await carregarCorridas();
+
+          }catch(e){
+
+            console.error(e);
+
+            alert(
+              "Erro de conexão ao enviar a avaliação."
+            );
+
+            enviar.disabled = false;
+            enviar.textContent =
+              "⭐ ENVIAR AVALIAÇÃO";
+          }
+        });
+      };
+
       function cardHistorico(c){
         const st = statusInfo(c);
+        const concluida =
+          String(c.status || "").toUpperCase() === "CONCLUIDA";
+
+        const avaliada =
+          c.avaliacao_nota !== null &&
+          c.avaliacao_nota !== undefined &&
+          c.avaliacao_nota !== "";
+
+        let avaliacaoHtml = "";
+
+        if(concluida && !avaliada){
+
+          avaliacaoHtml = `
+            <button
+              type="button"
+              onclick="avaliarMotorista(${c.id})"
+              style="
+                width:100%;
+                margin-top:13px;
+                padding:14px;
+                border:0;
+                border-radius:15px;
+                background:#ff9d00;
+                color:#111;
+                font-weight:900;
+                font-size:14px;
+                cursor:pointer;
+              "
+            >
+              ⭐ AVALIAR MOTORISTA
+            </button>
+          `;
+
+        }else if(concluida && avaliada){
+
+          avaliacaoHtml = `
+            <div style="
+              margin-top:13px;
+              padding:12px;
+              border-radius:15px;
+              background:#fff8e8;
+              border:1px solid #ffe1a3;
+              text-align:center;
+            ">
+              <div style="
+                color:#ff9d00;
+                font-size:25px;
+                letter-spacing:2px;
+                font-weight:900;
+              ">
+                ${estrelasHtml(c.avaliacao_nota)}
+              </div>
+
+              <div style="
+                margin-top:3px;
+                font-size:11px;
+                color:#777;
+                font-weight:800;
+              ">
+                AVALIAÇÃO ENVIADA
+              </div>
+
+              ${
+                c.avaliacao_comentario
+                ? `
+                  <div style="
+                    margin-top:7px;
+                    color:#555;
+                    font-size:12px;
+                    line-height:1.4;
+                  ">
+                    “${String(c.avaliacao_comentario)
+                      .replace(/</g,"&lt;")
+                      .replace(/>/g,"&gt;")}"
+                  </div>
+                `
+                : ""
+              }
+            </div>
+          `;
+        }
 
         return `
           <div style="
             background:#fff;
             color:#111;
-            border-radius:18px;
-            padding:15px;
-            margin-bottom:10px;
-            border:1px solid #eee;
+            border-radius:20px;
+            padding:16px;
+            margin-bottom:11px;
+            border:1px solid #e8e8e8;
+            box-shadow:0 5px 18px rgba(0,0,0,.07);
           ">
+
             <div style="
               display:flex;
               justify-content:space-between;
+              align-items:center;
               gap:10px;
             ">
-              <strong>🏍️ Corrida #${c.id}</strong>
+
+              <div>
+                <div style="
+                  font-size:10px;
+                  color:#999;
+                  font-weight:900;
+                  text-transform:uppercase;
+                ">
+                  Histórico
+                </div>
+
+                <strong style="
+                  display:block;
+                  margin-top:3px;
+                  font-size:15px;
+                ">
+                  🏍️ Corrida #${c.id}
+                </strong>
+              </div>
 
               <span style="
-                font-size:11px;
+                padding:7px 9px;
+                border-radius:12px;
+                background:#f5f5f5;
+                font-size:10px;
                 font-weight:900;
                 color:#666;
               ">
                 ${st.emoji} ${st.titulo}
               </span>
+
             </div>
 
             <div style="
-              margin-top:9px;
+              margin-top:13px;
+              padding:12px;
+              border-radius:14px;
+              background:#f8f8f8;
               font-size:12px;
-              color:#666;
-              line-height:1.5;
+              color:#555;
+              line-height:1.55;
             ">
-              📍 ${c.origem || "-"}<br>
-              🏁 ${c.destino || "-"}
+              📍 <b>Origem:</b><br>
+              ${c.origem || "-"}<br><br>
+
+              🏁 <b>Destino:</b><br>
+              ${c.destino || "-"}
             </div>
 
             <div style="
               display:flex;
+              align-items:center;
               justify-content:space-between;
-              margin-top:10px;
-              padding-top:10px;
+              gap:10px;
+              margin-top:12px;
+              padding-top:12px;
               border-top:1px solid #eee;
             ">
-              <span style="font-size:12px;color:#777">
-                ${c.motorista_nome || "Sem motorista"}
-              </span>
 
-              <strong>
+              <div>
+                <div style="
+                  font-size:10px;
+                  color:#999;
+                  font-weight:900;
+                ">
+                  MOTORISTA
+                </div>
+
+                <div style="
+                  margin-top:3px;
+                  font-size:14px;
+                  font-weight:900;
+                ">
+                  🏍️ ${c.motorista_nome || "Sem motorista"}
+                </div>
+              </div>
+
+              <strong style="
+                font-size:19px;
+              ">
                 R$ ${Number(c.valor || 0).toFixed(2)}
               </strong>
+
             </div>
+
+            ${avaliacaoHtml}
+
           </div>
         `;
       }
@@ -5732,6 +6208,82 @@ def api_cancelar_corrida(id):
         return {"ok": False, "erro": "Corrida não pode mais ser cancelada."}
     return {"ok": True}
 
+
+
+@app.route("/api/corrida/<int:id>/avaliar", methods=["POST"])
+def api_avaliar_corrida(id):
+    pid = _passageiro_logado()
+
+    if not pid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    data = _json()
+
+    try:
+        nota = int(data.get("nota"))
+    except Exception:
+        return {"ok": False, "erro": "Escolha uma nota de 1 a 5 estrelas."}, 400
+
+    if nota < 1 or nota > 5:
+        return {"ok": False, "erro": "A nota deve ser entre 1 e 5 estrelas."}, 400
+
+    comentario = str(data.get("comentario") or "").strip()
+
+    if len(comentario) > 500:
+        comentario = comentario[:500]
+
+    conn = conectar()
+
+    corrida = conn.execute("""
+        SELECT id, passageiro_id, motorista_id, status, avaliacao_nota
+        FROM corridas_vai
+        WHERE id=? AND passageiro_id=?
+    """, (id, pid)).fetchone()
+
+    if not corrida:
+        conn.close()
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida["status"] != "CONCLUIDA":
+        conn.close()
+        return {
+            "ok": False,
+            "erro": "A avaliação só pode ser feita após a corrida ser concluída."
+        }, 400
+
+    if not corrida["motorista_id"]:
+        conn.close()
+        return {
+            "ok": False,
+            "erro": "Esta corrida não possui motorista."
+        }, 400
+
+    if corrida["avaliacao_nota"] is not None:
+        conn.close()
+        return {
+            "ok": False,
+            "erro": "Esta corrida já foi avaliada."
+        }, 400
+
+    conn.execute("""
+        UPDATE corridas_vai
+        SET avaliacao_nota=?,
+            avaliacao_comentario=?,
+            avaliado_em=CURRENT_TIMESTAMP
+        WHERE id=?
+          AND passageiro_id=?
+          AND status='CONCLUIDA'
+          AND avaliacao_nota IS NULL
+    """, (nota, comentario, id, pid))
+
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "nota": nota,
+        "comentario": comentario
+    }
 
 @app.route("/api/motorista/me")
 def api_motorista_me():
