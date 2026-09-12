@@ -2831,6 +2831,85 @@ def _distancia_km(lat1, lon1, lat2, lon2):
         return 0.0
 
 
+# ========================================================
+# MIGRAÇÃO SEGURA — TAXA DE DESLOCAMENTO
+# Não apaga nem altera usuários, motoristas ou corridas.
+# ========================================================
+try:
+    conn = conectar()
+    try:
+        conn.execute(
+            "ALTER TABLE corridas_vai ADD COLUMN taxa_deslocamento REAL DEFAULT 0"
+        )
+    except Exception:
+        pass
+
+    try:
+        conn.execute(
+            "ALTER TABLE corridas_vai ADD COLUMN distancia_motorista_km REAL DEFAULT 0"
+        )
+    except Exception:
+        pass
+
+    conn.commit()
+    conn.close()
+except Exception:
+    pass
+
+
+def _taxa_deslocamento_motorista(origem_lat, origem_lon):
+    """
+    Calcula a taxa de deslocamento com base no motorista
+    aprovado e ONLINE mais próximo do passageiro.
+
+    Até 5 km: R$ 0,00
+    Acima de 5 km: R$ 0,50 por km excedente.
+    """
+    try:
+        lat = float(origem_lat)
+        lon = float(origem_lon)
+    except Exception:
+        return 0.0, 0.0
+
+    try:
+        conn = conectar()
+        motoristas = conn.execute("""
+            SELECT id, latitude, longitude
+            FROM motoqueiros
+            WHERE status='aprovado'
+              AND conexao='online'
+              AND latitude IS NOT NULL
+              AND longitude IS NOT NULL
+        """).fetchall()
+        conn.close()
+    except Exception:
+        return 0.0, 0.0
+
+    menor_distancia = None
+
+    for m in motoristas:
+        try:
+            d = _distancia_km(
+                lat,
+                lon,
+                m["latitude"],
+                m["longitude"]
+            )
+
+            if d > 0 and (menor_distancia is None or d < menor_distancia):
+                menor_distancia = d
+        except Exception:
+            continue
+
+    if menor_distancia is None:
+        return 0.0, 0.0
+
+    excedente = max(0.0, menor_distancia - 5.0)
+    taxa = round(excedente * 0.50, 2)
+
+    return taxa, round(menor_distancia, 2)
+
+
 def _pagina_publica(titulo, corpo, manifesto=None):
     if manifesto == "motorista":
         manifest_href = "/static/pwa/manifest-motorista.json"
@@ -3608,7 +3687,17 @@ async function calcular(){
     const d=await r.json();
     if(!d.ok){msg(d.erro||"Não foi possível calcular.","erro");return;}
     document.getElementById("estimativa").style.display="block";
-    document.getElementById("estimativa").innerHTML='<b>Distância:</b> '+d.distancia_km.toFixed(2)+' km<br><div class="pub-price">R$ '+d.valor.toFixed(2)+'</div><small>Taxa do aplicativo: R$ '+d.taxa_app.toFixed(2)+' · Motorista: R$ '+d.valor_motorista.toFixed(2)+'</small>';
+    const taxaDeslocamento = Number(d.taxa_deslocamento || 0);
+    const valorBase = Number(d.valor_base || (d.valor - taxaDeslocamento));
+    document.getElementById("estimativa").innerHTML=
+      "<b>Distância:</b> "+d.distancia_km.toFixed(2)+" km<br>"+
+      "<div class=\"pub-price\">TOTAL: R$ "+d.valor.toFixed(2)+"</div>"+
+      "<small>"+
+      "Corrida: R$ "+valorBase.toFixed(2)+
+      " · Deslocamento: R$ "+taxaDeslocamento.toFixed(2)+
+      "<br>Taxa do aplicativo: R$ "+d.taxa_app.toFixed(2)+
+      " · Motorista: R$ "+d.valor_motorista.toFixed(2)+
+      "</small>";
     document.getElementById("solicitar").style.display="block";
     window._corrida=d;
   } catch(e) {
@@ -6219,25 +6308,51 @@ def api_endereco_gps():
 @app.route("/api/calcular-corrida", methods=["POST"])
 def api_calcular_corrida():
     data = _json()
+
+    origem_lat = data.get("origem_lat")
+    origem_lon = data.get("origem_lon")
+
     distancia = _distancia_km(
-        data.get("origem_lat"), data.get("origem_lon"),
-        data.get("dest_lat"), data.get("dest_lon")
+        origem_lat,
+        origem_lon,
+        data.get("dest_lat"),
+        data.get("dest_lon")
     )
+
     if distancia <= 0:
         return {"ok": False, "erro": "Coordenadas inválidas."}
-    # Tarifa VAI_DE_MOTO:
-    # Até 4 km = R$ 7,00 fixos
-    # Acima de 4 km = R$ 2,00 por km da distância total
+
+    # ========================================================
+    # TARIFA BASE VAI_DE_MOTO
+    # Até 4 km = R$ 7,00
+    # Acima de 4 km = R$ 2,00 por km
+    # ========================================================
     if distancia <= 4:
-        valor = 7.00
+        valor_base = 7.00
     else:
-        valor = round(distancia * PRECO_KM, 2)
+        valor_base = round(distancia * PRECO_KM, 2)
+
+    # ========================================================
+    # TAXA DE DESLOCAMENTO DO MOTORISTA
+    # Até 5 km = R$ 0,00
+    # Acima de 5 km = R$ 0,50 por km excedente
+    # ========================================================
+    taxa_deslocamento, distancia_motorista = _taxa_deslocamento_motorista(
+        origem_lat,
+        origem_lon
+    )
+
+    valor = round(valor_base + taxa_deslocamento, 2)
 
     taxa = round(valor * TAXA_APP, 2)
     motorista = round(valor - taxa, 2)
+
     return {
         "ok": True,
         "distancia_km": round(distancia, 2),
+        "valor_base": round(valor_base, 2),
+        "taxa_deslocamento": taxa_deslocamento,
+        "distancia_motorista_km": distancia_motorista,
         "valor": valor,
         "taxa_app": taxa,
         "valor_motorista": motorista,
@@ -6290,6 +6405,31 @@ def api_solicitar_corrida():
             "erro": "Origem, destino e valor são obrigatórios."
         }, 400
 
+    # ========================================================
+    # RECALCULA O VALOR NO SERVIDOR
+    # O celular não pode alterar a taxa de deslocamento.
+    # ========================================================
+    try:
+        origem_lat = float(data.get("origem_lat"))
+        origem_lon = float(data.get("origem_lon"))
+    except Exception:
+        origem_lat = None
+        origem_lon = None
+
+    taxa_deslocamento, distancia_motorista = _taxa_deslocamento_motorista(
+        origem_lat,
+        origem_lon
+    )
+
+    # Recalcula a tarifa base usando a distância enviada.
+    # Mantém a regra atual da tarifa do VAI_DE_MOTO.
+    if distancia <= 4:
+        valor_base = 7.00
+    else:
+        valor_base = round(distancia * PRECO_KM, 2)
+
+    valor = round(valor_base + taxa_deslocamento, 2)
+
     taxa = round(
         valor * TAXA_APP,
         2
@@ -6324,7 +6464,9 @@ def api_solicitar_corrida():
                 pix_chave,
                 distancia_km,
                 taxa_app,
-                valor_motorista
+                valor_motorista,
+                taxa_deslocamento,
+                distancia_motorista_km
             )
             VALUES (
                 ?,
@@ -6349,7 +6491,9 @@ def api_solicitar_corrida():
             PIX_ADMIN,
             distancia,
             taxa,
-            valor_motorista
+            valor_motorista,
+            taxa_deslocamento,
+            distancia_motorista
         ))
 
         conn.commit()
@@ -6364,6 +6508,8 @@ def api_solicitar_corrida():
             "valor": valor,
             "taxa_app": taxa,
             "valor_motorista": valor_motorista,
+            "taxa_deslocamento": taxa_deslocamento,
+            "distancia_motorista_km": distancia_motorista,
             "pagamento": "DINHEIRO",
             "pagamento_status": "NAO_APLICAVEL",
             "status": "PENDENTE",
@@ -6372,14 +6518,14 @@ def api_solicitar_corrida():
 
 
     # ========================================================
+    # ========================================================
     # PIX / CARTAO
     # ========================================================
     # A corrida NÃO fica disponível ao motorista ainda.
     conn = conectar()
 
     cur = conn.execute("""
-        INSERT INTO corridas_vai
-        (
+        INSERT INTO corridas_vai (
             passageiro_id,
             motorista_id,
             origem,
@@ -6392,7 +6538,9 @@ def api_solicitar_corrida():
             pix_chave,
             distancia_km,
             taxa_app,
-            valor_motorista
+            valor_motorista,
+            taxa_deslocamento,
+            distancia_motorista_km
         )
         VALUES (
             ?,
@@ -6407,6 +6555,8 @@ def api_solicitar_corrida():
             ?,
             ?,
             ?,
+            ?,
+            ?,
             ?
         )
     """, (
@@ -6418,13 +6568,13 @@ def api_solicitar_corrida():
         PIX_ADMIN,
         distancia,
         taxa,
-        valor_motorista
+        valor_motorista,
+        taxa_deslocamento,
+        distancia_motorista
     ))
 
     conn.commit()
-
     corrida_id = cur.lastrowid
-
     conn.close()
 
     # Cria o Checkout específico:
