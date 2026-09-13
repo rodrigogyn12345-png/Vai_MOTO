@@ -3655,28 +3655,116 @@ async function usarGPS(){
   }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
 }
 async function buscarDestino(){
-  const q=document.getElementById("destino").value.trim();
-  if(!q){msg("Digite o destino.","erro");return;}
+  const campo = document.getElementById("destino");
+  const box = document.getElementById("resultado-endereco");
+  const botao = document.querySelector('button[onclick="buscarDestino()"]');
 
-  const lat=document.getElementById("origem_lat").value;
-  const lon=document.getElementById("origem_lon").value;
+  const q = campo.value.trim();
 
-  const r=await fetch("/api/buscar-enderecos",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({q,lat,lon})
-  });
-  const d=await r.json();
-  const box=document.getElementById("resultado-endereco");
-  box.innerHTML="";
-  if(!d.ok || !d.resultados.length){box.innerHTML='<div class="alert erro">Endereço não encontrado.</div>';return;}
-  d.resultados.forEach(x=>{
-    const b=document.createElement("button");
-    b.className="pub-btn"; b.type="button"; b.textContent=x.display_name;
-    b.onclick=()=>{document.getElementById("destino").value=x.display_name;document.getElementById("dest_lat").value=x.lat;document.getElementById("dest_lon").value=x.lon;box.innerHTML='<div class="alert sucesso">Destino selecionado.</div>';};
-    box.appendChild(b);
-  });
+  if(!q){
+    msg("Digite o destino.","erro");
+    return;
+  }
+
+  const lat = document.getElementById("origem_lat").value;
+  const lon = document.getElementById("origem_lon").value;
+
+  box.innerHTML = '<div class="alert">🔎 Procurando endereço...</div>';
+
+  if(botao){
+    botao.disabled = true;
+    botao.textContent = "🔎 BUSCANDO...";
+  }
+
+  try {
+    const r = await fetch("/api/buscar-enderecos", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json"
+      },
+      body: JSON.stringify({
+        q: q,
+        lat: lat || "",
+        lon: lon || ""
+      })
+    });
+
+    if(!r.ok){
+      throw new Error("HTTP " + r.status);
+    }
+
+    const d = await r.json();
+
+    box.innerHTML = "";
+
+    if(!d || !d.ok || !Array.isArray(d.resultados) || d.resultados.length === 0){
+      box.innerHTML =
+        '<div class="alert erro">❌ Endereço não encontrado.<br>' +
+        'Tente informar cidade, bairro ou nome do local.</div>';
+      return;
+    }
+
+    const titulo = document.createElement("div");
+    titulo.className = "alert sucesso";
+    titulo.innerHTML = "📍 <b>Selecione o destino:</b>";
+    box.appendChild(titulo);
+
+    d.resultados.forEach((x, indice) => {
+      const b = document.createElement("button");
+
+      b.type = "button";
+      b.className = "pub-btn";
+      b.style.marginTop = "8px";
+      b.style.textAlign = "left";
+      b.style.whiteSpace = "normal";
+      b.style.lineHeight = "1.35";
+      b.innerHTML =
+        "📍 <b>Opção " + (indice + 1) + "</b><br>" +
+        escapeHtmlDestino(x.display_name || "Endereço encontrado");
+
+      b.onclick = function(){
+        campo.value = x.display_name || "";
+        document.getElementById("dest_lat").value = x.lat || "";
+        document.getElementById("dest_lon").value = x.lon || "";
+
+        box.innerHTML =
+          '<div class="alert sucesso">' +
+          '✅ <b>Destino selecionado!</b><br>' +
+          escapeHtmlDestino(x.display_name || "") +
+          '</div>';
+
+        msg("Destino selecionado. Agora toque em CALCULAR CORRIDA.","sucesso");
+      };
+
+      box.appendChild(b);
+    });
+
+  } catch(e) {
+    console.error("Erro ao buscar destino:", e);
+
+    box.innerHTML =
+      '<div class="alert erro">' +
+      '❌ Não foi possível buscar o endereço agora.<br>' +
+      'Tente novamente.' +
+      '</div>';
+  } finally {
+    if(botao){
+      botao.disabled = false;
+      botao.textContent = "🔎 BUSCAR DESTINO";
+    }
+  }
 }
+
+function escapeHtmlDestino(texto){
+  return String(texto || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
   const dLat=document.getElementById("dest_lat").value, dLon=document.getElementById("dest_lon").value;
