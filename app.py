@@ -3604,7 +3604,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button class="pub-btn" type="button" onclick="buscarDestino()">🔎 BUSCAR DESTINO</button>
+        <button id="btnBuscarDestino" class="pub-btn" type="button" onclick="buscarDestino()">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
@@ -3706,6 +3706,8 @@ async function buscarDestino(){
     box.innerHTML='<div class="alert erro">❌ Erro ao buscar endereço. Tente novamente.</div>';
   }
 }
+
+window.buscarDestino = buscarDestino;
 
 async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
