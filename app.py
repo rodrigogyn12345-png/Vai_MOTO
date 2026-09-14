@@ -3525,7 +3525,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="window.buscarDestino()">🔎 BUSCAR DESTINO</button>
+        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="alert('FUNCAO: ' + typeof window.buscarDestino)">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
