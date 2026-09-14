@@ -53,6 +53,7 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
     Não altera corridas nem usuários.
     """
     if not VAPID_PUBLIC_KEY or not VAPID_PRIVATE_KEY:
+        print("[PUSH] VAPID não configurado.", flush=True)
         return
 
     try:
@@ -69,6 +70,8 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
           AND m.status = 'aprovado'
     """).fetchall()
     conn.close()
+
+    print(f"[PUSH] Inscrições online encontradas: {len(inscritos)}", flush=True)
 
     dados = {
         "title": titulo,
@@ -97,7 +100,9 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
                     "sub": "https://vai-moto.onrender.com"
                 }
             )
+            print(f"[PUSH] Enviado com sucesso para inscrição {inscrito['id']}.", flush=True)
         except WebPushException as erro:
+            print(f"[PUSH] WebPushException na inscrição {inscrito['id']}: {erro}", flush=True)
             # 404/410 normalmente significam inscrição expirada.
             # Removemos somente a inscrição Push inválida.
             status_code = getattr(erro, "status_code", None)
@@ -110,7 +115,8 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
                 )
                 conn.commit()
                 conn.close()
-        except Exception:
+        except Exception as erro:
+            print(f"[PUSH] Erro na inscrição {inscrito['id']}: {erro}", flush=True)
             # Uma inscrição com problema não interrompe as demais.
             continue
 
