@@ -3455,7 +3455,7 @@ def passageiro():
         <button class="pub-btn pub-blue" type="button" onclick="alert(`JS: ${typeof window.usarMinhaLocalizacao}`)">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
-<script>alert("SCRIPT PASSAGEIRO OK")
+<script>
 async function usarMinhaLocalizacao(){
     const origem = document.getElementById("origem");
     const latInput = document.getElementById("origem_lat");
@@ -3576,7 +3576,7 @@ window.buscarDestino = async function(){
           <option value="CARTAO">💳 Cartão</option>
         </select>
 
-        <button class="pub-btn pub-green" type="button" id="btnCalcularCorrida" onclick="calcular().catch(function(e){msg('Erro ao calcular: '+(e.message||e),'erro')})">💰 CALCULAR CORRIDA</button>
+        <button class="pub-btn pub-green" type="button" id="btnCalcularCorrida" onclick="window.calcular()">💰 CALCULAR CORRIDA</button>
         <button id="solicitar" class="pub-btn pub-yellow" type="button" onclick="solicitar()" style="display:none">🏍️ SOLICITAR CORRIDA</button>
         <div id="mensagem"></div>
       </div>
@@ -4894,6 +4894,7 @@ async function solicitar(){
 
 })();
 
+    <script src="/static/passageiro.js?v=1"></script>
     """, manifesto="passageiro")
 
 
