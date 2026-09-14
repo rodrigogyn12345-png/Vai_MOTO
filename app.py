@@ -3756,6 +3756,8 @@ async function buscarDestino(){
   }
 }
 
+window.buscarDestino = buscarDestino;
+
 function escapeHtmlDestino(texto){
   return String(texto || "")
     .replace(/&/g, "&amp;")
