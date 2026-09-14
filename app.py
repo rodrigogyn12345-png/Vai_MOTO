@@ -3647,72 +3647,7 @@ console.log("VAI_DE_MOTO: capturador de erros ativo");
 
       </div>
 
-      <!-- FIX BUSCA DESTINO -->
-<script>
-window.buscarDestino = async function(){
-  const campo = document.getElementById("destino");
-  const box = document.getElementById("resultado-endereco");
-
-  if(!campo || !box){
-    alert("ERRO: elementos do destino não encontrados");
-    return;
-  }
-
-  const q = campo.value.trim();
-
-  if(!q){
-    box.innerHTML = '<div class="alert erro">Digite o destino.</div>';
-    return;
-  }
-
-  const lat = document.getElementById("origem_lat")?.value || "";
-  const lon = document.getElementById("origem_lon")?.value || "";
-
-  box.innerHTML = '<div class="alert">🔎 BUSCANDO DESTINO...</div>';
-
-  try{
-    const r = await fetch("/api/buscar-enderecos", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({q:q,lat:lat,lon:lon})
-    });
-
-    const d = await r.json();
-
-    if(!d.ok || !d.resultados || !d.resultados.length){
-      box.innerHTML = '<div class="alert erro">❌ Endereço não encontrado.</div>';
-      return;
-    }
-
-    box.innerHTML = "";
-
-    d.resultados.forEach(function(x){
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "pub-btn";
-      b.textContent = "📍 " + x.display_name;
-
-      b.onclick = function(){
-        campo.value = x.display_name;
-        document.getElementById("dest_lat").value = x.lat;
-        document.getElementById("dest_lon").value = x.lon;
-
-        box.innerHTML =
-          '<div class="alert sucesso">✅ DESTINO SELECIONADO!</div>';
-      };
-
-      box.appendChild(b);
-    });
-
-  }catch(e){
-    console.error(e);
-    box.innerHTML =
-      '<div class="alert erro">❌ Erro ao buscar endereço.</div>';
-  }
-};
-</script>
-
-<div id="corridas" class="pub-card">
+      <div id="corridas" class="pub-card">
         <h3>🚕 Minhas corridas</h3>
         <div id="lista-corridas">Carregando...</div>
       </div>
