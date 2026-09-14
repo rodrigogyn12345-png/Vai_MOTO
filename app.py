@@ -3452,7 +3452,7 @@ def passageiro():
         <input id="origem" class="pub-input" placeholder="Sua localização">
         <input id="origem_lat" type="hidden">
         <input id="origem_lon" type="hidden">
-        <button class="pub-btn pub-blue" type="button" onclick="window.usarMinhaLocalizacao()">🎯 USAR MINHA LOCALIZAÇÃO</button>
+        <button class="pub-btn pub-blue" type="button" onclick="alert('BOTAO FUNCIONA')">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
 <script>
