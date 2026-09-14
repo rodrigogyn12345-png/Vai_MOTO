@@ -3604,7 +3604,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="alert('TESTE DE CLIQUE OK')">🔎 BUSCAR DESTINO</button>
+        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="buscarDestino().catch(function(e){msg('Erro ao buscar destino: '+(e.message||e),'erro')})">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
@@ -3616,7 +3616,7 @@ async function usarMinhaLocalizacao(){
           <option value="CARTAO">💳 Cartão</option>
         </select>
 
-        <button class="pub-btn pub-green" type="button" id="btnCalcularCorrida">💰 CALCULAR CORRIDA</button>
+        <button class="pub-btn pub-green" type="button" id="btnCalcularCorrida" onclick="calcular().catch(function(e){msg('Erro ao calcular: '+(e.message||e),'erro')})">💰 CALCULAR CORRIDA</button>
         <button id="solicitar" class="pub-btn pub-yellow" type="button" onclick="solicitar()" style="display:none">🏍️ SOLICITAR CORRIDA</button>
         <div id="mensagem"></div>
       </div>
@@ -4966,20 +4966,6 @@ async function solicitar(){
 
 })();
 
-const btnBuscarDestino = document.getElementById("btnBuscarDestino");
-if (btnBuscarDestino) btnBuscarDestino.addEventListener("click", buscarDestino);
-const btnCalcularCorrida = document.getElementById("btnCalcularCorrida");
-if (btnCalcularCorrida) btnCalcularCorrida.addEventListener("click", calcular);
-console.log("VAI_DE_MOTO: JAVASCRIPT DO PASSAGEIRO ATIVO");
-</script>
-<script>
-document.addEventListener("DOMContentLoaded", function(){
-  const b1=document.getElementById("btnBuscarDestino");
-  const b2=document.getElementById("btnCalcularCorrida");
-  if(b1 && typeof buscarDestino === "function") b1.onclick=buscarDestino;
-  if(b2 && typeof calcular === "function") b2.onclick=calcular;
-});
-</script>
     """, manifesto="passageiro")
 
 
