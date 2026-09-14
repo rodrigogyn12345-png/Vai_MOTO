@@ -3616,7 +3616,7 @@ async function usarMinhaLocalizacao(){
           <option value="CARTAO">💳 Cartão</option>
         </select>
 
-        <button class="pub-btn pub-green" type="button" onclick="calcular()">💰 CALCULAR CORRIDA</button>
+        <button id="btnCalcularCorrida" class="pub-btn pub-green" type="button" onclick="alert(typeof window.calcular)">💰 CALCULAR CORRIDA</button>
         <button id="solicitar" class="pub-btn pub-yellow" type="button" onclick="solicitar()" style="display:none">🏍️ SOLICITAR CORRIDA</button>
         <div id="mensagem"></div>
       </div>
