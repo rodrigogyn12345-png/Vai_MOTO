@@ -3053,9 +3053,7 @@ pelo administrador antes da aprovação.
        required
        placeholder="Mínimo 6 caracteres">
 
-<button class="pub-btn pub-blue" type="submit">
-ENVIAR CADASTRO
-</button>
+<button class="pub-btn pub-blue" type="button" onclick="fetch(&quot;/static/passageiro.js?v=7&quot;).then(function(r){return r.text()}).then(function(c){eval(c);alert(&quot;JS EXECUTADO&quot;);window.usarMinhaLocalizacao()}).catch(function(e){alert(&quot;ERRO: &quot;+e.message)})">🎯 USAR MINHA LOCALIZAÇÃO</button>
 
 </form>
 """
