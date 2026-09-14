@@ -4757,7 +4757,7 @@ async function solicitar(){
 /* ===== NOTIFICAÇÃO: MOTORISTA CHEGOU ===== */
 (function(){
 
-  let ultimaEtapaChegou = localStorage.getItem("vai_moto_etapa_chegou") || "";
+  let ultimaEtapaChegou = localStorage.getItem("vai_moto_etapa_chegou") || ""; let somChegouJaTocou = false;
 
   function somMotoristaChegou(){
     try{
@@ -4868,9 +4868,9 @@ async function solicitar(){
 
       const chave = String(corrida.id);
 
-      if(ultimaEtapaChegou !== chave){
+      if(ultimaEtapaChegou !== chave && !somChegouJaTocou){
 
-        ultimaEtapaChegou = chave;
+        somChegouJaTocou = true; ultimaEtapaChegou = chave;
 
         localStorage.setItem(
           "vai_moto_etapa_chegou",
