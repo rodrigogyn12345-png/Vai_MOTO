@@ -3455,7 +3455,7 @@ def passageiro():
         <button class="pub-btn pub-blue" type="button" onclick="alert(`JS: ${typeof window.usarMinhaLocalizacao}`)">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
-<script>
+<script>alert("SCRIPT PASSAGEIRO OK")
 async function usarMinhaLocalizacao(){
     const origem = document.getElementById("origem");
     const latInput = document.getElementById("origem_lat");
