@@ -3655,7 +3655,7 @@ async function usarGPS(){
     }
   }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
 }
-async function buscarDestino(){
+window.buscarDestino = async function(){
   const q=document.getElementById("destino").value.trim();
   if(!q){msg("Digite o destino.","erro");return;}
 
