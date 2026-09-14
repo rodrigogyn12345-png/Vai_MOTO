@@ -4894,7 +4894,7 @@ async function solicitar(){
 
 })();
 
-    <script src="/static/passageiro.js?v=3" onload="alert('PASSAGEIRO JS CARREGOU')" onerror="alert('ERRO AO CARREGAR JS')"></script>
+    <script src="/static/passageiro.js?v=3"></script>
     """, manifesto="passageiro")
 
 
