@@ -24,6 +24,10 @@ LIMITE_MOTOQUEIROS = 20
 # ASAAS - PAGAMENTOS
 # A chave fica somente em variável de ambiente.
 # =========================================================
+# VAPID - notificações Push
+VAPID_PUBLIC_KEY = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+
 ASAAS_API_KEY = os.getenv("ASAAS_API_KEY", "").strip()
 ASAAS_BASE_URL = os.getenv(
     "ASAAS_BASE_URL",
@@ -41,6 +45,74 @@ def conectar():
     conn.row_factory = sqlite3.Row
     return conn
 
+
+
+def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
+    """
+    Envia uma notificação Push para os motoristas que estão online.
+    Não altera corridas nem usuários.
+    """
+    if not VAPID_PUBLIC_KEY or not VAPID_PRIVATE_KEY:
+        return
+
+    try:
+        from pywebpush import webpush, WebPushException
+    except Exception:
+        return
+
+    conn = conectar()
+    inscritos = conn.execute("""
+        SELECT DISTINCT s.id, s.endpoint, s.p256dh, s.auth
+        FROM motoqueiro_push_subscriptions s
+        INNER JOIN motoqueiros m ON m.id = s.motorista_id
+        WHERE m.conexao = 'online'
+          AND m.status = 'aprovado'
+    """).fetchall()
+    conn.close()
+
+    dados = {
+        "title": titulo,
+        "body": corpo,
+        "data": {
+            "url": "/motorista",
+            "corrida_id": corrida_id
+        }
+    }
+
+    for inscrito in inscritos:
+        subscription_info = {
+            "endpoint": inscrito["endpoint"],
+            "keys": {
+                "p256dh": inscrito["p256dh"],
+                "auth": inscrito["auth"]
+            }
+        }
+
+        try:
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(dados),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={
+                    "sub": "https://vai-moto.onrender.com"
+                }
+            )
+        except WebPushException as erro:
+            # 404/410 normalmente significam inscrição expirada.
+            # Removemos somente a inscrição Push inválida.
+            status_code = getattr(erro, "status_code", None)
+
+            if status_code in (404, 410):
+                conn = conectar()
+                conn.execute(
+                    "DELETE FROM motoqueiro_push_subscriptions WHERE id=?",
+                    (inscrito["id"],)
+                )
+                conn.commit()
+                conn.close()
+        except Exception:
+            # Uma inscrição com problema não interrompe as demais.
+            continue
 
 
 def criar_checkout_asaas(corrida_id, valor, origem, destino, pagamento='PIX'):
@@ -302,6 +374,21 @@ def iniciar_banco():
             )
 
     conn.commit()
+    # Inscrições de notificações Push dos motoristas.
+    # Tabela independente: não altera usuários, corridas ou pagamentos.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS motoqueiro_push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            motorista_id INTEGER NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+
     conn.close()
 
 iniciar_banco()
@@ -5009,7 +5096,8 @@ body{overscroll-behavior:none}
   <button id="onlineAction" class="online-action off" onclick="alternarStatus()">FICAR ONLINE</button>
 
   <button class="center-btn" onclick="centralizar()" title="Centralizar">⌖</button>
-  <button class="sound-btn" onclick="testarSom()" title="Notificação">◉</button>
+  <button class="sound-btn" onclick="testarSom()" title="Testar som">◉</button>
+  <button class="sound-btn" style="right:82px;font-size:22px" onclick="ativarNotificacoesPush()" title="Ativar notificações">🔔</button>
 
   <div class="sheet" id="sheet">
     <div class="handle"></div>
@@ -5353,6 +5441,65 @@ async function ganhos(){
 }
 function renderGanhos(d){document.getElementById('lista').innerHTML='<div class="ride-card"><div class="ride-row"><div><div class="ride-muted">GANHOS DE HOJE</div><div style="font-size:32px;font-weight:900;margin-top:4px">'+br(d.total_hoje)+'</div></div><div style="text-align:right"><div class="ride-muted">CORRIDAS</div><div style="font-size:25px;font-weight:900">'+d.corridas_hoje+'</div></div></div><div style="margin-top:15px;color:#aaa;font-size:13px">Total concluído: <b style="color:#fff">'+br(d.total_geral)+'</b></div></div>';}
 function mostrar(view,el){currentView=view;document.querySelectorAll('.nav-item').forEach(x=>x.classList.remove('active'));if(el)el.classList.add('active');if(view==='historico'){minhas();renderHistorico(window._minhas||[]);document.getElementById('sheetTitle').textContent='Histórico de corridas';document.getElementById('sheetSub').textContent='Confira suas corridas e os respectivos valores.'}else if(view==='ganhos'){ganhos();document.getElementById('sheetTitle').textContent='Meus ganhos';document.getElementById('sheetSub').textContent='Acompanhe quanto você ganhou.'}else{document.getElementById('sheetTitle').textContent=online?'Você está online':'Você está offline';document.getElementById('sheetSub').textContent=online?'Aguardando novos pedidos em Aragoiânia.':'Fique online para receber novos pedidos em Aragoiânia.';carregar();}}
+async function ativarNotificacoesPush(){
+  try{
+    if(!("serviceWorker" in navigator) || !("PushManager" in window)){
+      alert("Este navegador não suporta notificações Push.");
+      return;
+    }
+
+    const permissao = await Notification.requestPermission();
+
+    if(permissao !== "granted"){
+      alert("Permissão de notificações não autorizada.");
+      return;
+    }
+
+    const registro = await navigator.serviceWorker.ready;
+
+    const resposta = await fetch("/api/push/public-key");
+    const dados = await resposta.json();
+
+    if(!dados.ok || !dados.public_key){
+      alert("Notificações Push não estão configuradas no servidor.");
+      return;
+    }
+
+    function base64ParaUint8Array(base64){
+      const padding = "=".repeat((4 - base64.length % 4) % 4);
+      const base64Url = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const rawData = atob(base64Url);
+      return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+    }
+
+    let inscricao = await registro.pushManager.getSubscription();
+
+    if(!inscricao){
+      inscricao = await registro.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64ParaUint8Array(dados.public_key)
+      });
+    }
+
+    const salvar = await fetch("/api/motorista/push/subscribe", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(inscricao.toJSON())
+    });
+
+    const resultado = await salvar.json();
+
+    if(!resultado.ok){
+      throw new Error(resultado.erro || "Não foi possível registrar o dispositivo.");
+    }
+
+    alert("🔔 Notificações ativadas com sucesso!");
+
+  }catch(e){
+    alert("Erro ao ativar notificações: " + e.message);
+  }
+}
+
 function testarSom(){try{const C=window.AudioContext||window.webkitAudioContext,c=new C(),o=c.createOscillator(),g=c.createGain();o.frequency.value=720;g.gain.value=.07;o.connect(g);g.connect(c.destination);o.start();setTimeout(()=>o.frequency.value=1050,130);setTimeout(()=>{o.stop();c.close()},380)}catch(e){}}
 initMap();status();carregar();minhas();ganhos();setInterval(()=>{
   status();
@@ -6376,6 +6523,12 @@ def api_solicitar_corrida():
 
         conn.close()
 
+        enviar_push_motoristas_online(
+            "NOVA CORRIDA!",
+            f"Nova corrida disponível — corrida #{corrida_id}.",
+            corrida_id
+        )
+
         return {
             "ok": True,
             "id": corrida_id,
@@ -6635,6 +6788,47 @@ def api_motorista_me():
     if not m:
         return {"ok": False, "erro": "Motorista não encontrado."}, 404
     return {"ok": True, **dict(m)}
+
+
+@app.route("/api/push/public-key")
+def api_push_public_key():
+    if not VAPID_PUBLIC_KEY:
+        return {"ok": False, "erro": "Notificações Push não configuradas."}, 503
+    return {"ok": True, "public_key": VAPID_PUBLIC_KEY}
+
+
+@app.route("/api/motorista/push/subscribe", methods=["POST"])
+def api_motorista_push_subscribe():
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    data = _json()
+    endpoint = str(data.get("endpoint") or "").strip()
+    keys = data.get("keys") or {}
+    p256dh = str(keys.get("p256dh") or "").strip()
+    auth = str(keys.get("auth") or "").strip()
+
+    if not endpoint or not p256dh or not auth:
+        return {"ok": False, "erro": "Inscrição Push inválida."}, 400
+
+    conn = conectar()
+
+    conn.execute("""
+        INSERT INTO motoqueiro_push_subscriptions
+            (motorista_id, endpoint, p256dh, auth, atualizado_em)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(endpoint) DO UPDATE SET
+            motorista_id=excluded.motorista_id,
+            p256dh=excluded.p256dh,
+            auth=excluded.auth,
+            atualizado_em=CURRENT_TIMESTAMP
+    """, (mid, endpoint, p256dh, auth))
+
+    conn.commit()
+    conn.close()
+
+    return {"ok": True}
 
 
 @app.route("/api/motorista/status", methods=["POST"])
@@ -7707,6 +7901,12 @@ def asaas_webhook():
                     END
                 WHERE id=?
             """, (corrida["id"],))
+
+            enviar_push_motoristas_online(
+                "NOVA CORRIDA!",
+                f"Pagamento confirmado — corrida #{corrida["id"]} disponível.",
+                corrida["id"]
+            )
 
         elif evento == "CHECKOUT_CANCELED":
             conn.execute("""
