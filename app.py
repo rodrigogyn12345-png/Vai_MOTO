@@ -4894,7 +4894,7 @@ async function solicitar(){
 
 })();
 
-    <script src="/static/passageiro.js?v=2"></script>
+    <script src="/static/passageiro.js?v=3"></script>
     """, manifesto="passageiro")
 
 

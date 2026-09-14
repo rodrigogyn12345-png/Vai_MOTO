@@ -1,3 +1,4 @@
+alert("JS EXTERNO OK");
 window.usarMinhaLocalizacao = async function(){
   const origem = document.getElementById("origem");
   const latInput = document.getElementById("origem_lat");
