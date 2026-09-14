@@ -604,6 +604,7 @@ textarea {
 
 <style>
 #vaiSplash {
+    pointer-events:none;
     position:fixed;
     inset:0;
     z-index:99999;
