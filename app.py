@@ -4970,6 +4970,15 @@ const btnBuscarDestino = document.getElementById("btnBuscarDestino");
 if (btnBuscarDestino) btnBuscarDestino.addEventListener("click", buscarDestino);
 const btnCalcularCorrida = document.getElementById("btnCalcularCorrida");
 if (btnCalcularCorrida) btnCalcularCorrida.addEventListener("click", calcular);
+console.log("VAI_DE_MOTO: JAVASCRIPT DO PASSAGEIRO ATIVO");
+</script>
+<script>
+document.addEventListener("DOMContentLoaded", function(){
+  const b1=document.getElementById("btnBuscarDestino");
+  const b2=document.getElementById("btnCalcularCorrida");
+  if(b1 && typeof buscarDestino === "function") b1.onclick=buscarDestino;
+  if(b2 && typeof calcular === "function") b2.onclick=calcular;
+});
 </script>
     """, manifesto="passageiro")
 
