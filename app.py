@@ -3518,6 +3518,45 @@ async function usarMinhaLocalizacao(){
         }
     );
 }
+
+window.buscarDestino = async function(){
+  const q = document.getElementById("destino").value.trim();
+  const box = document.getElementById("resultado-endereco");
+  if(!q){ alert("Digite o destino."); return; }
+  if(box) box.innerHTML = "<div class=\"alert\">🔎 Buscando destino...</div>";
+  try{
+    const lat = document.getElementById("origem_lat").value;
+    const lon = document.getElementById("origem_lon").value;
+    const r = await fetch("/api/buscar-enderecos", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({q:q,lat:lat,lon:lon}),
+      cache:"no-store",
+      credentials:"same-origin"
+    });
+    const d = await r.json();
+    if(!d.ok || !d.resultados || !d.resultados.length){
+      if(box) box.innerHTML = "<div class=\"alert erro\">Endereço não encontrado.</div>";
+      return;
+    }
+    if(box) box.innerHTML = "";
+    d.resultados.forEach(function(x){
+      const b=document.createElement("button");
+      b.className="pub-btn";
+      b.type="button";
+      b.textContent=x.display_name;
+      b.onclick=function(){
+        document.getElementById("destino").value=x.display_name;
+        document.getElementById("dest_lat").value=x.lat;
+        document.getElementById("dest_lon").value=x.lon;
+        if(box) box.innerHTML="<div class=\"alert sucesso\">Destino selecionado.</div>";
+      };
+      if(box) box.appendChild(b);
+    });
+  }catch(e){
+    if(box) box.innerHTML="<div class=\"alert erro\">Erro ao buscar destino: "+(e.message||e)+"</div>";
+  }
+};
 </script>
 
         <h3>🏁 Destino</h3>
@@ -3525,7 +3564,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="alert('FUNCAO: ' + typeof window.buscarDestino)">🔎 BUSCAR DESTINO</button>
+        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="window.buscarDestino()">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
