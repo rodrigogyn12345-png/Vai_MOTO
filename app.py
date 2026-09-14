@@ -8015,6 +8015,7 @@ def alerta_sonoro_motorista(response):
         throw new Error(d.erro || "Não foi possível aceitar a corrida.");
       }
 
+      pararChamada();
       window._corridaEmFluxo=true;
 
       const painel=document.getElementById("contador-nova-corrida");
