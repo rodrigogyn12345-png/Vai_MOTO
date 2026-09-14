@@ -3452,7 +3452,7 @@ def passageiro():
         <input id="origem" class="pub-input" placeholder="Sua localização">
         <input id="origem_lat" type="hidden">
         <input id="origem_lon" type="hidden">
-        <button class="pub-btn pub-blue" type="button" onclick="(function(){if(typeof window.usarMinhaLocalizacao===function){window.usarMinhaLocalizacao();return;}var s=document.createElement('script');s.src='/static/passageiro.js?v=5';s.onload=function(){window.usarMinhaLocalizacao();};s.onerror=function(){alert('Erro ao carregar o sistema de localização.')};document.head.appendChild(s)})()">🎯 USAR MINHA LOCALIZAÇÃO</button>
+        <button class="pub-btn pub-blue" type="button" onclick="alert(&quot;CLIQUE OK&quot;);var x=document.createElement(&quot;script&quot;);x.src=&quot;/static/passageiro.js?v=6&quot;;x.onload=function(){alert(&quot;JS CARREGADO&quot;)};x.onerror=function(){alert(&quot;ERRO JS&quot;)};document.head.append(chr(10));document.head.appendChild(x)">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
 <script>
