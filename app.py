@@ -3619,6 +3619,32 @@ async function usarMinhaLocalizacao(){
         <button id="btnCalcularCorrida" class="pub-btn pub-green" type="button" onclick="window.calcular()">💰 CALCULAR CORRIDA</button>
         <button id="solicitar" class="pub-btn pub-yellow" type="button" onclick="solicitar()" style="display:none">🏍️ SOLICITAR CORRIDA</button>
         <div id="mensagem"></div>
+<!-- DIAGNOSTICO JS VAI_DE_MOTO -->
+<script>
+window.addEventListener("error", function(e) {
+  var box = document.getElementById("mensagem");
+  if (box) {
+    box.innerHTML =
+      '<div class="alert erro">⚠️ ERRO JAVASCRIPT:<br>' +
+      (e.message || "erro desconhecido") +
+      '<br>Linha: ' + (e.lineno || "?") +
+      '</div>';
+  }
+});
+
+window.addEventListener("unhandledrejection", function(e) {
+  var box = document.getElementById("mensagem");
+  if (box) {
+    box.innerHTML =
+      '<div class="alert erro">⚠️ ERRO PROMISE:<br>' +
+      (e.reason && e.reason.message ? e.reason.message : String(e.reason)) +
+      '</div>';
+  }
+});
+
+console.log("VAI_DE_MOTO: capturador de erros ativo");
+</script>
+
       </div>
 
       <!-- FIX BUSCA DESTINO -->
