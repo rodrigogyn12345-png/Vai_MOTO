@@ -6390,13 +6390,12 @@ def api_calcular_corrida():
     if distancia <= 0:
         return {"ok": False, "erro": "Coordenadas inválidas."}
     # Tarifa VAI_DE_MOTO:
-    # Até 3 km = R$ 7,00 fixos, sem taxa de deslocamento
-    # Acima de 3 km = R$ 7,00 + R$ 1,00 por km excedente
-    if distancia <= 3:
-        taxa_deslocamento = 0.00
+    # Até 4 km = R$ 7,00 fixos
+    # Acima de 4 km = R$ 7,00 + R$ 2,00 por km excedente
+    if distancia <= 4:
+        valor = 7.00
     else:
-        taxa_deslocamento = round(distancia - 3.00, 2)
-    valor = round(7.00 + taxa_deslocamento, 2)
+        valor = round(7.00 + ((distancia - 4.00) * 2.00), 2)
 
     taxa = round(valor * TAXA_APP, 2)
     motorista = round(valor - taxa, 2)
