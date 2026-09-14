@@ -3604,7 +3604,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button id="btnBuscarDestino" class="pub-btn" type="button" onclick="window.buscarDestino()">🔎 BUSCAR DESTINO</button>
+        <button class="pub-btn" type="button" onclick="buscarDestino()">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
@@ -3616,35 +3616,9 @@ async function usarMinhaLocalizacao(){
           <option value="CARTAO">💳 Cartão</option>
         </select>
 
-        <button id="btnCalcularCorrida" class="pub-btn pub-green" type="button" onclick="window.calcular()">💰 CALCULAR CORRIDA</button>
+        <button class="pub-btn pub-green" type="button" onclick="calcular()">💰 CALCULAR CORRIDA</button>
         <button id="solicitar" class="pub-btn pub-yellow" type="button" onclick="solicitar()" style="display:none">🏍️ SOLICITAR CORRIDA</button>
         <div id="mensagem"></div>
-<!-- DIAGNOSTICO JS VAI_DE_MOTO -->
-<script>
-window.addEventListener("error", function(e) {
-  var box = document.getElementById("mensagem");
-  if (box) {
-    box.innerHTML =
-      '<div class="alert erro">⚠️ ERRO JAVASCRIPT:<br>' +
-      (e.message || "erro desconhecido") +
-      '<br>Linha: ' + (e.lineno || "?") +
-      '</div>';
-  }
-});
-
-window.addEventListener("unhandledrejection", function(e) {
-  var box = document.getElementById("mensagem");
-  if (box) {
-    box.innerHTML =
-      '<div class="alert erro">⚠️ ERRO PROMISE:<br>' +
-      (e.reason && e.reason.message ? e.reason.message : String(e.reason)) +
-      '</div>';
-  }
-});
-
-console.log("VAI_DE_MOTO: capturador de erros ativo");
-</script>
-
       </div>
 
       <div id="corridas" class="pub-card">
@@ -3682,59 +3656,28 @@ async function usarGPS(){
   }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
 }
 async function buscarDestino(){
-  const campo=document.getElementById("destino");
-  const box=document.getElementById("resultado-endereco");
-  const q=campo.value.trim();
-
-  if(!q){
-    msg("Digite o destino.","erro");
-    return;
-  }
+  const q=document.getElementById("destino").value.trim();
+  if(!q){msg("Digite o destino.","erro");return;}
 
   const lat=document.getElementById("origem_lat").value;
   const lon=document.getElementById("origem_lon").value;
 
-  box.innerHTML='<div class="alert">🔎 Buscando endereço...</div>';
-
-  try{
-    const r=await fetch("/api/buscar-enderecos",{
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({q,lat,lon})
-    });
-
-    const d=await r.json();
-    box.innerHTML="";
-
-    if(!d.ok || !d.resultados || !d.resultados.length){
-      box.innerHTML='<div class="alert erro">❌ Endereço não encontrado.</div>';
-      return;
-    }
-
-    d.resultados.forEach(x=>{
-      const b=document.createElement("button");
-      b.className="pub-btn";
-      b.type="button";
-      b.textContent=x.display_name;
-
-      b.onclick=()=>{
-        campo.value=x.display_name;
-        document.getElementById("dest_lat").value=x.lat;
-        document.getElementById("dest_lon").value=x.lon;
-        box.innerHTML='<div class="alert sucesso">✅ Destino selecionado.</div>';
-      };
-
-      box.appendChild(b);
-    });
-
-  }catch(e){
-    console.error("Erro ao buscar destino:",e);
-    box.innerHTML='<div class="alert erro">❌ Erro ao buscar endereço. Tente novamente.</div>';
-  }
+  const r=await fetch("/api/buscar-enderecos",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({q,lat,lon})
+  });
+  const d=await r.json();
+  const box=document.getElementById("resultado-endereco");
+  box.innerHTML="";
+  if(!d.ok || !d.resultados.length){box.innerHTML='<div class="alert erro">Endereço não encontrado.</div>';return;}
+  d.resultados.forEach(x=>{
+    const b=document.createElement("button");
+    b.className="pub-btn"; b.type="button"; b.textContent=x.display_name;
+    b.onclick=()=>{document.getElementById("destino").value=x.display_name;document.getElementById("dest_lat").value=x.lat;document.getElementById("dest_lon").value=x.lon;box.innerHTML='<div class="alert sucesso">Destino selecionado.</div>';};
+    box.appendChild(b);
+  });
 }
-
-window.buscarDestino = buscarDestino;
-
 async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
   const dLat=document.getElementById("dest_lat").value, dLon=document.getElementById("dest_lon").value;
@@ -3762,9 +3705,6 @@ async function calcular(){
     msg("Erro ao calcular a corrida. Tente novamente.","erro");
   }
 }
-window.calcular = calcular;
-console.log("VAI_DE_MOTO: calcular carregado");
-
 function atualizarBotaoPagamento(){
   const botao = document.getElementById("solicitar");
   const pagamento = document.getElementById("pagamento");
