@@ -3525,7 +3525,7 @@ async function usarMinhaLocalizacao(){
         <input id="dest_lat" type="hidden">
         <input id="dest_lon" type="hidden">
 
-        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="alert('CLIQUE OK')">🔎 BUSCAR DESTINO</button>
+        <button class="pub-btn" type="button" id="btnBuscarDestino" onclick="window.buscarDestino()">🔎 BUSCAR DESTINO</button>
 
         <div id="resultado-endereco"></div>
         <div id="estimativa" class="pub-info" style="display:none"></div>
@@ -3577,6 +3577,8 @@ async function usarGPS(){
   }, e=>msg("Não foi possível obter o GPS. Permita a localização no navegador.","erro"), {enableHighAccuracy:true,timeout:15000,maximumAge:10000});
 }
 window.buscarDestino = async function(){
+  try {
+  msg("🔎 Buscando destino...","alert");
   const q=document.getElementById("destino").value.trim();
   if(!q){msg("Digite o destino.","erro");return;}
 
@@ -3598,6 +3600,9 @@ window.buscarDestino = async function(){
     b.onclick=()=>{document.getElementById("destino").value=x.display_name;document.getElementById("dest_lat").value=x.lat;document.getElementById("dest_lon").value=x.lon;box.innerHTML='<div class="alert sucesso">Destino selecionado.</div>';};
     box.appendChild(b);
   });
+  } catch(e) {
+    msg("❌ Erro ao buscar destino: " + (e.message || e), "erro");
+  }
 }
 async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
