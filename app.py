@@ -3455,7 +3455,11 @@ def passageiro():
     nome = session.get("passageiro_nome", "Passageiro")
     return _pagina_publica("Passageiro", """
 
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
+.pass-map{height:300px;border-radius:22px;overflow:hidden;margin:-8px 0 18px;box-shadow:0 8px 24px rgba(0,0,0,.14);border:1px solid #e5e7eb}
+#passageiroMap{width:100%;height:100%;background:#dfe6eb}
+
 /* ===== PAINEL DO PASSAGEIRO - VISUAL PROFISSIONAL ===== */
 .pub-card{
     border-radius:24px !important;
@@ -3552,6 +3556,8 @@ body{background:#f5f6f8 !important;}
       </div>
       <h2>Olá, {{ session.get("passageiro_nome", "Passageiro") }}! 👋</h2>
       <div class="pub-info">📍 Ative o GPS para preencher sua localização.</div>
+
+        <div class="pass-map"><div id="passageiroMap"></div></div>
 
       <div class="pub-card">
         <h3>📍 Origem</h3>
@@ -3663,6 +3669,11 @@ window.buscarDestino = async function(){
     if(box) box.innerHTML="<div class=\"alert erro\">Erro ao buscar destino: "+(e.message||e)+"</div>";
   }
 };
+const passageiroMap=L.map("passageiroMap",{zoomControl:false,attributionControl:true}).setView([-16.9167,-49.4483],14);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(passageiroMap);
+let passageiroMarker=null;
+if(navigator.geolocation){navigator.geolocation.getCurrentPosition(function(p){const lat=p.coords.latitude,lon=p.coords.longitude;passageiroMarker=L.circleMarker([lat,lon],{radius:9,color:"#111",weight:3,fillColor:"#1e88ff",fillOpacity:1}).addTo(passageiroMap);passageiroMap.setView([lat,lon],16);});}
+
 </script>
 
         <h3>🏁 Destino</h3>
