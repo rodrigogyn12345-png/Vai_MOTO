@@ -3456,6 +3456,7 @@ def passageiro():
     return _pagina_publica("Passageiro", """
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <style>
 .pass-map{height:300px;border-radius:22px;overflow:hidden;margin:-8px 0 18px;box-shadow:0 8px 24px rgba(0,0,0,.14);border:1px solid #e5e7eb}
 #passageiroMap{width:100%;height:100%;background:#dfe6eb}
