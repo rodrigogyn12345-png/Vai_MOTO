@@ -3533,6 +3533,17 @@ def passageiro():
     font-size:19px !important;
 }
 
+/* ===== NOVO VISUAL PASSAGEIRO VAI_DE_MOTO ===== */
+body{background:#f5f6f8 !important;}
+.pub-nav{background:#fff !important;border-radius:18px !important;padding:10px !important;box-shadow:0 4px 16px rgba(0,0,0,.08) !important;margin-bottom:18px !important;}
+.pub-nav a{border-radius:12px !important;font-weight:800 !important;}
+.pub-card{background:#fff !important;border-radius:22px !important;margin-bottom:18px !important;}
+.pub-input{width:100% !important;box-sizing:border-box !important;background:#f8f9fb !important;border:2px solid #e5e7eb !important;}
+.pub-input:focus{border-color:#111827 !important;outline:none !important;box-shadow:0 0 0 3px rgba(17,24,39,.08) !important;}
+.pub-btn{width:100% !important;border:none !important;box-shadow:0 5px 14px rgba(0,0,0,.10) !important;}
+#estimativa{background:#f8fafc !important;border-radius:16px !important;padding:14px !important;margin-top:12px !important;}
+#lista-corridas{display:flex !important;flex-direction:column !important;gap:12px !important;}
+
 </style>
 
       <div class="pub-nav">
