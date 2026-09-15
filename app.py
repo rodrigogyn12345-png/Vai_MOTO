@@ -3690,10 +3690,52 @@ window.buscarDestino = async function(){
     if(box) box.innerHTML="<div class=\"alert erro\">Erro ao buscar destino: "+(e.message||e)+"</div>";
   }
 };
-const passageiroMap=L.map("passageiroMap",{zoomControl:false,attributionControl:true}).setView([-16.9167,-49.4483],14);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{maxZoom:19,attribution:"© OpenStreetMap"}).addTo(passageiroMap);
+let passageiroMap=null;
 let passageiroMarker=null;
-if(navigator.geolocation){navigator.geolocation.getCurrentPosition(function(p){const lat=p.coords.latitude,lon=p.coords.longitude;passageiroMarker=L.circleMarker([lat,lon],{radius:9,color:"#111",weight:3,fillColor:"#1e88ff",fillOpacity:1}).addTo(passageiroMap);passageiroMap.setView([lat,lon],16);});}
+
+function iniciarMapaPassageiro(){
+  const mapa=document.getElementById("passageiroMap");
+  if(!mapa || !window.L) return;
+
+  if(!passageiroMap){
+    passageiroMap=L.map("passageiroMap",{zoomControl:false,attributionControl:true}).setView([-16.9167,-49.4483],14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+      maxZoom:19,
+      attribution:"© OpenStreetMap"
+    }).addTo(passageiroMap);
+  }
+
+  setTimeout(function(){
+    passageiroMap.invalidateSize();
+  },300);
+
+  if(navigator.geolocation){
+    navigator.geolocation.getCurrentPosition(function(pos){
+      const lat=pos.coords.latitude;
+      const lon=pos.coords.longitude;
+
+      if(passageiroMarker){
+        passageiroMarker.setLatLng([lat,lon]);
+      }else{
+        passageiroMarker=L.circleMarker([lat,lon],{
+          radius:9,
+          color:"#111",
+          weight:3,
+          fillColor:"#1e88ff",
+          fillOpacity:1
+        }).addTo(passageiroMap);
+      }
+
+      passageiroMap.setView([lat,lon],16);
+      setTimeout(function(){
+        passageiroMap.invalidateSize();
+      },300);
+    });
+  }
+}
+
+window.addEventListener("load",iniciarMapaPassageiro);
+
 
 </script>
 
