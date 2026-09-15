@@ -3556,6 +3556,26 @@ body{background:#f5f6f8 !important;}
         <a href="/logout-usuario">🚪 Sair</a>
       </div>
       <h2>Olá, {{ session.get("passageiro_nome", "Passageiro") }}! 👋</h2>
+      <div id="motoristas-online-painel" style="background:linear-gradient(135deg,#ecfdf5,#f0fdf4);border:1px solid #bbf7d0;border-radius:16px;padding:14px 16px;margin:12px 0;font-weight:800;font-size:17px;color:#166534;text-align:center;">
+        🟢 Motoristas online: <span id="motoristas-online-numero">0</span>
+      </div>
+      <script>
+async function atualizarMotoristasOnline(){
+  try{
+    const resposta = await fetch("/api/motoristas-online", {cache:"no-store"});
+    const dados = await resposta.json();
+    if(dados.ok){
+      const numero = document.getElementById("motoristas-online-numero");
+      if(numero) numero.textContent = dados.online;
+    }
+  }catch(e){
+    console.log("Motoristas online:", e);
+  }
+}
+atualizarMotoristasOnline();
+setInterval(atualizarMotoristasOnline, 10000);
+</script>
+
       <div class="pub-info">📍 Ative o GPS para preencher sua localização.</div>
 
         <div class="pass-map"><div id="passageiroMap"></div></div>
@@ -6696,6 +6716,19 @@ def api_solicitar_corrida():
         "checkout_url": checkout_url
     }
 
+
+
+@app.route("/api/motoristas-online")
+def api_motoristas_online():
+    conn = conectar()
+    row = conn.execute("""
+        SELECT COUNT(*) AS n
+        FROM motoqueiros
+        WHERE status='aprovado'
+          AND conexao='online'
+    """).fetchone()
+    conn.close()
+    return {"ok": True, "online": int(row["n"] or 0)}
 
 
 @app.route("/api/minhas-corridas")
