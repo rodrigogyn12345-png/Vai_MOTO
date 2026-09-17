@@ -6641,6 +6641,7 @@ def api_solicitar_corrida():
                 ?,
                 ?,
                 ?,
+                ?,
                 'PENDENTE',
                 '',
                 'DINHEIRO',
