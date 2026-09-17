@@ -3978,7 +3978,7 @@ function iniciarMapaPassageiro(){
 
   if(!passageiroMap){
     passageiroMap=L.map("passageiroMap",{zoomControl:false,attributionControl:true}).setView([-16.9167,-49.4483],14);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",{
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png",{
       maxZoom:19,
       attribution:"© OpenStreetMap"
     }).addTo(passageiroMap);
