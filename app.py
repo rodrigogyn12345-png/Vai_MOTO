@@ -5425,8 +5425,8 @@ function renderPedidos(rides,ativas){
        </button>
 
        <button class="btn-finish"
-         onclick="concluir(${c.id})">
-         ✅ CONCLUIR CORRIDA
+         onclick="String(c.pagamento||'DINHEIRO').toUpperCase()==='DINHEIRO'?receberPassageiro(${c.id}):confirmarPagamentoOnline(${c.id})">
+         ${String(c.pagamento||'DINHEIRO').toUpperCase()==='DINHEIRO'?'💵 RECEBER DO PASSAGEIRO':'✅ PAGAMENTO ONLINE'}
        </button>
      </div>
    </div>`;
