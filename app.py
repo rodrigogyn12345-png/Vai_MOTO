@@ -5561,8 +5561,20 @@ async function minhas(){
 function renderHistorico(cs){
  const box=document.getElementById('lista');
  if(!cs.length){box.innerHTML='<div class="empty"><strong>Nenhuma corrida ainda</strong>Suas corridas aparecerão aqui.</div>';return}
- box.innerHTML=cs.map(c=>`<div class="ride-card"><div class="ride-row"><div class="ride-main"><b>Corrida #${c.id}</b><br>👤 ${esc(c.passageiro_nome||'Passageiro')}<br>📍 ${esc(c.origem)}<br>🏁 ${esc(c.destino)}<br><span class="ride-muted">📌 ${esc(c.status)}</span></div><div class="ride-price">${br(c.valor)}</div></div>${c.status==='ACEITA'?'<div class="ride-actions"><button class="btn-accept" onclick="acao('+c.id+',\'iniciar\')">INICIAR CORRIDA</button></div>':''}${c.status==='EM_ANDAMENTO'?'<div class="ride-actions"><button class="btn-accept" onclick="acao('+c.id+',\'concluir\')">CONCLUIR CORRIDA</button></div>':''}</div>`).join('');
+ box.innerHTML=cs.map(c=>`<div class="ride-card"><div class="ride-row"><div class="ride-main"><b>Corrida #${c.id}</b><br>👤 ${esc(c.passageiro_nome||'Passageiro')}<br>📍 ${esc(c.origem)}<br>🏁 ${esc(c.destino)}<br><span class="ride-muted">📌 ${esc(c.status)}</span></div><div class="ride-price">${br(c.valor)}</div></div>${c.status==='ACEITA'?'<div class="ride-actions"><button class="btn-accept" onclick="acao('+c.id+',\'iniciar\')">INICIAR CORRIDA</button></div>':''}${c.status==='EM_ANDAMENTO'?'<div class="ride-actions">'+(String(c.pagamento||'').toUpperCase()==='DINHEIRO'?'<button class="btn-accept" onclick="receberPassageiro('+c.id+')">💵 RECEBER DO PASSAGEIRO</button>':'<button class="btn-accept" onclick="confirmarPagamentoOnline('+c.id+')">✅ PAGAMENTO ONLINE</button>')+'</div>':''}</div>`).join('');
 }
+async function receberPassageiro(id){
+  if(!confirm('💵 O passageiro pagou em dinheiro?\n\nConfirme somente depois de receber o valor.')) return;
+  await acao(id,'concluir');
+  toast('💵 Pagamento recebido e corrida concluída!');
+}
+
+async function confirmarPagamentoOnline(id){
+  if(!confirm('✅ O pagamento desta corrida foi confirmado online?\n\nO passageiro não precisa pagar novamente.')) return;
+  await acao(id,'concluir');
+  toast('✅ Pagamento online confirmado e corrida concluída!');
+}
+
 async function acao(id,a){const r=await fetch('/api/corrida/'+id+'/'+a,{method:'POST'}),d=await r.json();toast(d.ok?'Atualizado!':(d.erro||'Erro'));minhas();ganhos();carregar();}
 async function ganhos(){
  try{const r=await fetch('/api/motorista/ganhos',{cache:'no-store'}),d=await r.json();if(!d.ok)return;document.getElementById('pillMoney').textContent=br(d.total_hoje);document.getElementById('hojeCorridas').textContent=d.corridas_hoje;document.getElementById('hojeGanhos').textContent=br(d.total_hoje);document.getElementById('totalGanhos').textContent=br(d.total_geral);if(currentView==='ganhos')renderGanhos(d);}catch(e){}
