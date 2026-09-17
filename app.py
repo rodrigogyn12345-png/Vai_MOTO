@@ -3695,6 +3695,102 @@ body{background:#f5f6f8 !important;}
 #estimativa{background:#f8fafc !important;border-radius:16px !important;padding:14px !important;margin-top:12px !important;}
 #lista-corridas{display:flex !important;flex-direction:column !important;gap:12px !important;}
 
+
+/* ===== VAI_DE_MOTO - PASSAGEIRO PREMIUM ===== */
+.pub-nav{
+  background:#111!important;
+  border-radius:16px!important;
+  padding:8px!important;
+  box-shadow:0 6px 18px rgba(0,0,0,.18)!important;
+}
+.pub-nav a{
+  color:#fff!important;
+  font-weight:900!important;
+  border-radius:11px!important;
+}
+.pub-nav a:first-child{
+  background:#f2c400!important;
+  color:#111!important;
+}
+body{background:#f3f4f6!important}
+.motoristas-online-passageiro{}
+#motoristas-online-painel{
+  background:linear-gradient(135deg,#111,#222)!important;
+  border:2px solid #f2c400!important;
+  color:#fff!important;
+  box-shadow:0 6px 18px rgba(0,0,0,.16)!important;
+  position:relative;
+  overflow:hidden;
+}
+#motoristas-online-painel span{color:#f2c400;font-size:24px}
+.pub-info{
+  background:#111!important;
+  color:#fff!important;
+  border-left:5px solid #f2c400!important;
+  border-radius:14px!important;
+  box-shadow:0 5px 15px rgba(0,0,0,.12)!important;
+}
+.pub-card{
+  background:#fff!important;
+  border:1px solid #e5e7eb!important;
+  border-radius:20px!important;
+  box-shadow:0 7px 22px rgba(0,0,0,.10)!important;
+  overflow:hidden!important;
+}
+.pub-card h3{
+  color:#111!important;
+  border-left:5px solid #f2c400;
+  padding-left:10px;
+}
+.pub-input{
+  background:#f8f9fb!important;
+  border:2px solid #dfe3e8!important;
+  border-radius:13px!important;
+  color:#111!important;
+}
+.pub-input:focus{
+  border-color:#f2c400!important;
+  box-shadow:0 0 0 3px rgba(242,196,0,.20)!important;
+}
+.pub-btn{
+  border-radius:13px!important;
+  font-weight:900!important;
+  transition:transform .15s ease,box-shadow .15s ease!important;
+}
+.pub-btn.pub-blue{
+  background:#f2c400!important;
+  color:#111!important;
+}
+.pub-btn.pub-green{
+  background:#111!important;
+  color:#fff!important;
+}
+#estimativa{
+  background:#111!important;
+  color:#fff!important;
+  border:2px solid #f2c400!important;
+  box-shadow:0 7px 20px rgba(0,0,0,.16)!important;
+}
+#estimativa strong,#estimativa b{color:#f2c400!important}
+.pass-map{
+  border:3px solid #111!important;
+  border-radius:20px!important;
+  overflow:hidden!important;
+  box-shadow:0 7px 22px rgba(0,0,0,.16)!important;
+  margin:14px 0!important;
+}
+#passageiroMap{min-height:300px!important}
+@media(max-width:600px){
+  .pub-nav a{font-size:15px!important;padding:11px 12px!important}
+  .pub-card{border-radius:17px!important}
+  .pub-card h3{font-size:22px!important}
+  .pub-input{font-size:17px!important;min-height:50px!important;padding:12px!important}
+  .pub-btn{font-size:17px!important;min-height:52px!important;padding:12px!important}
+  .pub-info{font-size:16px!important;padding:15px!important}
+  #motoristas-online-painel{font-size:16px!important;padding:13px!important}
+  #motoristas-online-painel span{font-size:22px!important}
+  #passageiroMap{min-height:260px!important}
+}
 </style>
 
       <div class="pub-nav">
