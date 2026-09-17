@@ -6932,6 +6932,8 @@ def api_solicitar_corrida():
             ?,
             ?,
             ?,
+            ?,
+            ?,
             'AGUARDANDO_PAGAMENTO',
             '',
             ?,
