@@ -3791,6 +3791,43 @@ body{background:#f3f4f6!important}
   #motoristas-online-painel span{font-size:22px!important}
   #passageiroMap{min-height:260px!important}
 }
+
+/* ===== NOVA INTERFACE PASSAGEIRO VAI_DE_MOTO ===== */
+body{background:#f4f5f7!important}
+.pub-nav{display:flex!important;gap:8px!important;align-items:center!important;justify-content:space-between!important;background:#111!important;border-radius:16px!important;padding:7px!important;margin-bottom:14px!important;box-shadow:0 5px 18px rgba(0,0,0,.16)!important}
+.pub-nav a{flex:1!important;text-align:center!important;font-size:15px!important;font-weight:900!important;padding:11px 8px!important;color:#fff!important;border-radius:11px!important;text-decoration:none!important}
+.pub-nav a:first-child{background:#f2c400!important;color:#111!important}
+.pub-card{background:#fff!important;border:1px solid #e4e7eb!important;border-radius:18px!important;margin-bottom:14px!important;padding:16px!important;box-shadow:0 6px 20px rgba(0,0,0,.09)!important}
+.pub-card h3{font-size:21px!important;line-height:1.2!important;margin:0 0 12px!important;padding-left:10px!important;border-left:5px solid #f2c400!important;color:#111!important}
+.pub-input{width:100%!important;box-sizing:border-box!important;min-height:50px!important;padding:12px 13px!important;border:2px solid #e1e4e8!important;border-radius:12px!important;background:#fafafa!important;color:#111!important;font-size:16px!important}
+.pub-input:focus{border-color:#f2c400!important;outline:none!important;box-shadow:0 0 0 3px rgba(242,196,0,.18)!important;background:#fff!important}
+.pub-btn{width:100%!important;min-height:50px!important;padding:12px!important;border:0!important;border-radius:12px!important;font-size:16px!important;font-weight:900!important;box-shadow:0 5px 13px rgba(0,0,0,.10)!important}
+.pub-btn.pub-blue{background:#f2c400!important;color:#111!important}
+.pub-btn.pub-green{background:#111!important;color:#fff!important}
+.pub-btn.pub-yellow{background:#f2c400!important;color:#111!important}
+.pub-label{display:block!important;font-size:15px!important;font-weight:900!important;margin:12px 0 6px!important;color:#222!important}
+.pub-card small{font-size:13px!important;line-height:1.4!important;color:#666!important}
+.pub-info{font-size:15px!important;line-height:1.4!important;padding:13px!important;border-radius:13px!important}
+#motoristas-online-painel{background:#111!important;border:2px solid #f2c400!important;color:#fff!important;border-radius:15px!important;padding:11px!important;margin:10px 0 13px!important;font-size:15px!important;box-shadow:0 5px 16px rgba(0,0,0,.14)!important}
+#motoristas-online-painel span{color:#f2c400!important;font-size:22px!important}
+.pass-map{height:280px!important;margin:12px 0 15px!important;border:3px solid #111!important;border-radius:18px!important;overflow:hidden!important;box-shadow:0 6px 20px rgba(0,0,0,.14)!important}
+#passageiroMap{height:100%!important;min-height:0!important}
+#estimativa{background:#111!important;color:#fff!important;border:2px solid #f2c400!important;border-radius:15px!important;padding:14px!important;margin-top:12px!important;box-shadow:0 6px 18px rgba(0,0,0,.16)!important}
+#estimativa .pub-price{font-size:29px!important;font-weight:900!important;color:#f2c400!important;margin:7px 0!important}
+#estimativa b{color:#f2c400!important}
+#resultado-endereco{margin-top:8px!important}
+#resultado-endereco .pub-btn{margin-top:7px!important;background:#f7f7f7!important;color:#111!important;border:1px solid #ddd!important;box-shadow:none!important;text-align:left!important;font-size:14px!important}
+#mensagem .alert{border-radius:13px!important;margin-top:12px!important}
+#corridas{margin-top:14px!important}
+#lista-corridas{gap:10px!important}
+@media(max-width:600px){
+  .pub-card{padding:14px!important;border-radius:16px!important}
+  .pub-card h3{font-size:20px!important}
+  .pub-input{font-size:16px!important;min-height:48px!important}
+  .pub-btn{font-size:16px!important;min-height:49px!important}
+  .pass-map{height:250px!important}
+  h2{font-size:25px!important;margin:12px 0!important}
+}
 </style>
 
       <div class="pub-nav">
