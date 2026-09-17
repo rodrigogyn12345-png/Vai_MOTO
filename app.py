@@ -47,7 +47,7 @@ def conectar():
 
 
 
-def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
+def enviar_push_motoristas_online(titulo, corpo, corrida_id=None, passageiro_lat=None, passageiro_lon=None):
     """
     Envia uma notificação Push para os motoristas que estão online.
     Não altera corridas nem usuários.
@@ -63,7 +63,10 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
 
     conn = conectar()
     inscritos = conn.execute("""
-        SELECT DISTINCT s.id, s.endpoint, s.p256dh, s.auth
+        SELECT DISTINCT
+            s.id, s.endpoint, s.p256dh, s.auth,
+            m.latitude AS motorista_lat,
+            m.longitude AS motorista_lon
         FROM motoqueiro_push_subscriptions s
         INNER JOIN motoqueiros m ON m.id = s.motorista_id
         WHERE m.conexao = 'online'
@@ -81,6 +84,26 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None):
             "corrida_id": corrida_id
         }
     }
+
+    # Filtra motoristas pelo raio de até 8 km do passageiro.
+    if passageiro_lat is not None and passageiro_lon is not None:
+        filtrados = []
+        for inscrito in inscritos:
+            try:
+                distancia_motorista = _distancia_km(
+                    passageiro_lat,
+                    passageiro_lon,
+                    inscrito["motorista_lat"],
+                    inscrito["motorista_lon"]
+                )
+                if distancia_motorista <= 8.0:
+                    filtrados.append((distancia_motorista, inscrito))
+            except Exception:
+                continue
+
+        filtrados.sort(key=lambda item: item[0])
+        inscritos = [item[1] for item in filtrados]
+        print(f"[PUSH] Motoristas dentro de 8 km: {len(inscritos)}", flush=True)
 
     for inscrito in inscritos:
         subscription_info = {
@@ -322,6 +345,16 @@ def iniciar_banco():
         pass
     try:
         conn.execute("ALTER TABLE corridas_vai ADD COLUMN valor_motorista REAL DEFAULT 0")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN origem_lat REAL")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN origem_lon REAL")
     except Exception:
         pass
 
@@ -6519,6 +6552,9 @@ def api_solicitar_corrida():
     origem = (data.get("origem") or "").strip()
     destino = (data.get("destino") or "").strip()
 
+    origem_lat = data.get("origem_lat")
+    origem_lon = data.get("origem_lon")
+
     pagamento = (
         data.get("pagamento")
         or "DINHEIRO"
@@ -6575,6 +6611,8 @@ def api_solicitar_corrida():
                 motorista_id,
                 origem,
                 destino,
+                origem_lat,
+                origem_lon,
                 valor,
                 status,
                 observacao,
@@ -6604,6 +6642,8 @@ def api_solicitar_corrida():
             pid,
             origem,
             destino,
+            origem_lat,
+            origem_lon,
             valor,
             PIX_ADMIN,
             distancia,
@@ -6620,7 +6660,9 @@ def api_solicitar_corrida():
         enviar_push_motoristas_online(
             "NOVA CORRIDA!",
             f"Nova corrida disponível — corrida #{corrida_id}.",
-            corrida_id
+            corrida_id,
+            origem_lat,
+            origem_lon
         )
 
         return {
@@ -6649,6 +6691,8 @@ def api_solicitar_corrida():
             motorista_id,
             origem,
             destino,
+            origem_lat,
+            origem_lon,
             valor,
             status,
             observacao,
@@ -6678,6 +6722,8 @@ def api_solicitar_corrida():
         pid,
         origem,
         destino,
+        origem_lat,
+        origem_lon,
         valor,
         pagamento,
         PIX_ADMIN,
@@ -8012,7 +8058,9 @@ def asaas_webhook():
             enviar_push_motoristas_online(
                 "NOVA CORRIDA!",
                 f"Pagamento confirmado — corrida #{corrida["id"]} disponível.",
-                corrida["id"]
+                corrida["id"],
+                corrida["origem_lat"],
+                corrida["origem_lon"]
             )
 
         elif evento == "CHECKOUT_CANCELED":
