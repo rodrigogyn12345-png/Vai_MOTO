@@ -5575,7 +5575,7 @@ async function confirmarPagamentoOnline(id){
   toast('✅ Pagamento online confirmado e corrida concluída!');
 }
 
-async function acao(id,a){const r=await fetch('/api/corrida/'+id+'/'+a,{method:'POST'}),d=await r.json();toast(d.ok?'Atualizado!':(d.erro||'Erro'));minhas();ganhos();carregar();}
+async function acao(id,a){const r=await fetch('/api/corrida/'+id+'/'+a,{method:'POST',credentials:'same-origin'}),d=await r.json();toast(d.ok?'Atualizado!':(d.erro||'Erro'));minhas();ganhos();carregar();}
 async function ganhos(){
  try{const r=await fetch('/api/motorista/ganhos',{cache:'no-store'}),d=await r.json();if(!d.ok)return;document.getElementById('pillMoney').textContent=br(d.total_hoje);document.getElementById('hojeCorridas').textContent=d.corridas_hoje;document.getElementById('hojeGanhos').textContent=br(d.total_hoje);document.getElementById('totalGanhos').textContent=br(d.total_geral);if(currentView==='ganhos')renderGanhos(d);}catch(e){}
 }
