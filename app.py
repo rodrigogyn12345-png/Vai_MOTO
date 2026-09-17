@@ -726,6 +726,98 @@ textarea {
     }
 }
 
+
+/* ===== LOGIN MOTORISTA VAI_DE_MOTO ===== */
+.motorista-login{
+  background:#fff;
+  border-radius:22px;
+  padding:22px;
+  box-shadow:0 10px 30px rgba(0,0,0,.18);
+  border:2px solid #f2c400;
+  max-width:620px;
+  margin:10px auto;
+}
+.motorista-login-header{
+  display:flex;
+  align-items:center;
+  gap:12px;
+  background:#111;
+  color:#fff;
+  padding:16px;
+  border-radius:16px;
+  margin-bottom:18px;
+}
+.motorista-logo{font-size:42px}
+.motorista-brand{font-size:28px;font-weight:900;letter-spacing:.5px}
+.motorista-brand span,.motorista-title span{color:#f2c400}
+.motorista-sub{font-size:13px;color:#ddd;margin-top:3px}
+.motorista-title{font-size:27px;font-weight:900;margin:8px 0 4px}
+.motorista-desc{font-size:15px;color:#666;margin-bottom:18px}
+.motorista-login .pub-label{display:block;font-size:15px!important;font-weight:800;margin:12px 0 6px}
+.motorista-input{
+  width:100%!important;
+  box-sizing:border-box!important;
+  font-size:17px!important;
+  min-height:52px!important;
+  padding:13px 14px!important;
+  border:2px solid #ddd!important;
+  border-radius:12px!important;
+  background:#fafafa!important;
+}
+.motorista-input:focus{border-color:#f2c400!important;outline:none!important;box-shadow:0 0 0 3px rgba(242,196,0,.18)}
+.motorista-entrar{
+  width:100%!important;
+  margin-top:18px!important;
+  min-height:54px!important;
+  padding:12px!important;
+  font-size:19px!important;
+  font-weight:900!important;
+  background:#f2c400!important;
+  color:#111!important;
+  border:0!important;
+  border-radius:13px!important;
+}
+.motorista-cadastro{
+  display:block!important;
+  width:100%!important;
+  box-sizing:border-box!important;
+  margin-top:10px!important;
+  min-height:50px!important;
+  padding:12px!important;
+  font-size:16px!important;
+  font-weight:900!important;
+  text-align:center!important;
+  background:#111!important;
+  color:#fff!important;
+  border-radius:13px!important;
+  text-decoration:none!important;
+}
+.motorista-beneficios{
+  display:flex;
+  justify-content:space-around;
+  gap:8px;
+  margin-top:20px;
+  padding-top:15px;
+  border-top:1px solid #ddd;
+  color:#333;
+  font-size:13px;
+  text-align:center;
+}
+.motorista-beneficios div:first-letter{font-size:22px}
+@media(max-width:600px){
+  .motorista-login{padding:16px;border-radius:18px;margin:6px 0}
+  .motorista-login-header{padding:13px}
+  .motorista-logo{font-size:34px}
+  .motorista-brand{font-size:23px}
+  .motorista-sub{font-size:12px}
+  .motorista-title{font-size:23px}
+  .motorista-desc{font-size:14px}
+  .motorista-login .pub-label{font-size:14px!important}
+  .motorista-input{font-size:16px!important;min-height:48px!important}
+  .motorista-entrar{font-size:18px!important;min-height:50px!important}
+  .motorista-cadastro{font-size:15px!important;min-height:48px!important}
+  .motorista-beneficios{font-size:12px}
+}
 </style>
 
 <style>
@@ -3459,15 +3551,36 @@ def login_motorista():
 
 
 MOTORISTA_LOGIN_FORM = """
-<h2>🏍️ Entrar como motorista</h2>
-<form method="post">
-<label class="pub-label">Telefone</label>
-<input class="pub-input" name="telefone" required>
-<label class="pub-label">Senha</label>
-<input class="pub-input" name="senha" type="password" required>
-<button class="pub-btn pub-blue" type="submit">ENTRAR</button>
-</form>
-<a class="pub-btn" href="/cadastro/motorista">CRIAR CONTA DE MOTORISTA</a>
+<div class="motorista-login">
+  <div class="motorista-login-header">
+    <div class="motorista-logo">🏍️</div>
+    <div>
+      <div class="motorista-brand">VAI_DE_<span>MOTO</span></div>
+      <div class="motorista-sub">Transporte de moto rápido e local</div>
+    </div>
+  </div>
+
+  <div class="motorista-title">🏍️ Entrar como <span>motorista</span></div>
+  <div class="motorista-desc">Acesse sua conta e comece a rodar com a gente!</div>
+
+  <form method="post">
+    <label class="pub-label">Telefone</label>
+    <input class="pub-input motorista-input" name="telefone" placeholder="Digite seu telefone" required>
+
+    <label class="pub-label">Senha</label>
+    <input class="pub-input motorista-input" name="senha" type="password" placeholder="Digite sua senha" required>
+
+    <button class="pub-btn motorista-entrar" type="submit">ENTRAR ➜</button>
+  </form>
+
+  <a class="pub-btn motorista-cadastro" href="/cadastro/motorista">👤 CRIAR CONTA DE MOTORISTA</a>
+
+  <div class="motorista-beneficios">
+    <div>💰<b> Ganhe mais</b></div>
+    <div>⏰<b> Seu horário</b></div>
+    <div>🏍️<b> Faça parte</b></div>
+  </div>
+</div>
 """
 
 
