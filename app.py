@@ -7258,7 +7258,7 @@ def api_solicitar_corrida():
     origem_lat = data.get("origem_lat")
     origem_lon = data.get("origem_lon")
 
-        corrida_para_outra_pessoa = int(data.get("corrida_para_outra_pessoa") or 0)
+    corrida_para_outra_pessoa = int(data.get("corrida_para_outra_pessoa") or 0)
     passageiro_embarque_nome = (data.get("passageiro_embarque_nome") or "").strip()
     passageiro_embarque_telefone = (data.get("passageiro_embarque_telefone") or "").strip()
     origem_outra_pessoa = (data.get("origem_outra_pessoa") or "").strip()
