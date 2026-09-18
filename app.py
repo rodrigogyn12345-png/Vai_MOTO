@@ -412,7 +412,30 @@ def iniciar_banco():
                 (generate_password_hash("123456"), "62993903299")
             )
 
+    # Corrida para outra pessoa — migração segura.
+    # Não apaga nem altera usuários, motoristas, corridas ou pagamentos existentes.
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN corrida_para_outra_pessoa INTEGER DEFAULT 0")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN passageiro_embarque_nome TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN passageiro_embarque_telefone TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    try:
+        conn.execute("ALTER TABLE corridas_vai ADD COLUMN origem_outra_pessoa TEXT DEFAULT ''")
+    except Exception:
+        pass
+
     conn.commit()
+
     # Inscrições de notificações Push dos motoristas.
     # Tabela independente: não altera usuários, corridas ou pagamentos.
     conn.execute("""
@@ -3893,6 +3916,23 @@ setInterval(atualizarMotoristasOnline, 10000);
         <button class="pub-btn pub-blue" type="button" onclick="fetch(&quot;/static/passageiro.js?v=8&quot;).then(function(r){return r.text()}).then(function(c){eval(c);alert(&quot;JS EXECUTADO&quot;);window.usarMinhaLocalizacao()}).catch(function(e){alert(&quot;ERRO: &quot;+e.message)})">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
+        <div class="outra-pessoa-box">
+          <label class="pub-label">👤 Quem vai embarcar?</label>
+          <label class="outra-pessoa-option">
+            <input type="checkbox" id="corridaParaOutraPessoa" onchange="alternarOutraPessoa()">
+            <span>É uma corrida para outra pessoa</span>
+          </label>
+
+          <div id="dadosOutraPessoa" style="display:none">
+            <input id="passageiro_embarque_nome" class="pub-input" placeholder="Nome de quem vai embarcar">
+            <input id="passageiro_embarque_telefone" class="pub-input" type="tel" placeholder="Telefone de quem vai embarcar">
+            <input id="origem_outra_pessoa" class="pub-input" placeholder="Endereço onde a pessoa vai embarcar">
+            <button class="pub-btn" type="button" onclick="buscarEmbarqueOutraPessoa()">🔎 BUSCAR EMBARQUE</button>
+            <div id="resultado-embarque-outra-pessoa"></div>
+            <small>Informe o endereço exato de embarque da pessoa e selecione o resultado encontrado.</small>
+          </div>
+        </div>
+
 <script>
 async function usarMinhaLocalizacao(){
     const origem = document.getElementById("origem");
@@ -3956,6 +3996,69 @@ async function usarMinhaLocalizacao(){
         }
     );
 }
+
+async function buscarEmbarqueOutraPessoa(){
+  const q = (document.getElementById("origem_outra_pessoa")?.value || "").trim();
+  const box = document.getElementById("resultado-embarque-outra-pessoa");
+
+  if(!q){
+    msg("Digite o endereço onde a pessoa vai embarcar.","erro");
+    return;
+  }
+
+  if(box) box.innerHTML = '<div class="alert">🔎 Buscando endereço de embarque...</div>';
+
+  try{
+    const lat = document.getElementById("origem_lat")?.value || "";
+    const lon = document.getElementById("origem_lon")?.value || "";
+
+    const r = await fetch("/api/buscar-enderecos", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({q:q,lat:lat,lon:lon}),
+      cache:"no-store",
+      credentials:"same-origin"
+    });
+
+    const d = await r.json();
+
+    if(!d.ok || !d.resultados || !d.resultados.length){
+      if(box) box.innerHTML = '<div class="alert erro">Endereço de embarque não encontrado.</div>';
+      return;
+    }
+
+    if(box) box.innerHTML = "";
+
+    d.resultados.forEach(function(x){
+      const b = document.createElement("button");
+      b.className = "pub-btn";
+      b.type = "button";
+      b.textContent = x.display_name;
+
+      b.onclick = function(){
+        document.getElementById("origem_outra_pessoa").value = x.display_name;
+        document.getElementById("origem").value = x.display_name;
+        document.getElementById("origem_lat").value = x.lat;
+        document.getElementById("origem_lon").value = x.lon;
+
+        if(box){
+          box.innerHTML = '<div class="alert sucesso">Embarque selecionado.</div>';
+        }
+
+        msg("📍 Endereço de embarque selecionado.","sucesso");
+      };
+
+      if(box) box.appendChild(b);
+    });
+
+  }catch(e){
+    if(box) box.innerHTML =
+      '<div class="alert erro">Erro ao buscar endereço: ' +
+      (e.message || e) + '</div>';
+  }
+}
+
+window.buscarEmbarqueOutraPessoa = buscarEmbarqueOutraPessoa;
 
 window.buscarDestino = async function(){
   const q = document.getElementById("destino").value.trim();
@@ -4104,7 +4207,19 @@ async function usarGPS(){
 async function calcular(){
   const aLat=document.getElementById("origem_lat").value, aLon=document.getElementById("origem_lon").value;
   const dLat=document.getElementById("dest_lat").value, dLon=document.getElementById("dest_lon").value;
-  if(!aLat||!aLon){msg("Use o GPS para definir a origem.","erro");return;}
+  const corridaParaOutraPessoa =
+    !!document.getElementById("corridaParaOutraPessoa")?.checked;
+
+  if(!aLat||!aLon){
+    msg(
+      corridaParaOutraPessoa
+        ? "Busque e selecione o endereço de embarque da outra pessoa."
+        : "Use o GPS para definir a origem.",
+      "erro"
+    );
+    return;
+  }
+
   if(!dLat||!dLon){msg("Busque e selecione o destino.","erro");return;}
   try {
     const r=await fetch("/api/calcular-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({origem_lat:aLat,origem_lon:aLon,dest_lat:dLat,dest_lon:dLon})});
@@ -4133,6 +4248,28 @@ function atualizarBotaoPagamento(){
 
 
 
+function alternarOutraPessoa(){
+  const chk=document.getElementById("corridaParaOutraPessoa");
+  const box=document.getElementById("dadosOutraPessoa");
+  const origem=document.getElementById("origem");
+  const origemLat=document.getElementById("origem_lat");
+  const origemLon=document.getElementById("origem_lon");
+  const endereco=document.getElementById("origem_outra_pessoa");
+
+  const ativa=!!(chk && chk.checked);
+
+  if(box) box.style.display=ativa ? "block" : "none";
+
+  if(ativa){
+    if(origem) origem.placeholder="Endereço da pessoa que vai embarcar";
+    if(origemLat) origemLat.value="";
+    if(origemLon) origemLon.value="";
+  }else{
+    if(endereco) endereco.value="";
+    if(origem) origem.placeholder="Sua localização";
+  }
+}
+
 async function solicitar(){
   if(!window._corrida){
     msg("Calcule a corrida primeiro.","erro");
@@ -4141,6 +4278,25 @@ async function solicitar(){
 
   const pagamento =
     document.getElementById("pagamento").value;
+
+  const corridaParaOutraPessoa =
+    !!document.getElementById("corridaParaOutraPessoa")?.checked;
+
+  const passageiroEmbarqueNome =
+    (document.getElementById("passageiro_embarque_nome")?.value || "").trim();
+
+  const passageiroEmbarqueTelefone =
+    (document.getElementById("passageiro_embarque_telefone")?.value || "").trim();
+
+  const origemOutraPessoa =
+    (document.getElementById("origem_outra_pessoa")?.value || "").trim();
+
+  if(corridaParaOutraPessoa &&
+     (!passageiroEmbarqueNome || !passageiroEmbarqueTelefone || !origemOutraPessoa)){
+    msg("Informe nome, telefone e endereço de embarque da pessoa.","erro");
+    return;
+  }
+
 
   if(!["DINHEIRO","PIX","CARTAO"].includes(pagamento)){
     msg("Escolha Dinheiro, PIX ou Cartão.","erro");
@@ -4191,7 +4347,12 @@ async function solicitar(){
       window._corrida.taxa_app,
 
     valor_motorista:
-      window._corrida.valor_motorista
+      window._corrida.valor_motorista,
+
+    corrida_para_outra_pessoa: corridaParaOutraPessoa ? 1 : 0,
+    passageiro_embarque_nome: passageiroEmbarqueNome,
+    passageiro_embarque_telefone: passageiroEmbarqueTelefone,
+    origem_outra_pessoa: origemOutraPessoa
   };
 
   try{
@@ -6839,6 +7000,14 @@ def api_solicitar_corrida():
     origem_lat = data.get("origem_lat")
     origem_lon = data.get("origem_lon")
 
+        corrida_para_outra_pessoa = int(data.get("corrida_para_outra_pessoa") or 0)
+    passageiro_embarque_nome = (data.get("passageiro_embarque_nome") or "").strip()
+    passageiro_embarque_telefone = (data.get("passageiro_embarque_telefone") or "").strip()
+    origem_outra_pessoa = (data.get("origem_outra_pessoa") or "").strip()
+
+    if corrida_para_outra_pessoa and origem_outra_pessoa:
+        origem = origem_outra_pessoa
+
     pagamento = (
         data.get("pagamento")
         or "DINHEIRO"
@@ -6905,7 +7074,11 @@ def api_solicitar_corrida():
                 pix_chave,
                 distancia_km,
                 taxa_app,
-                valor_motorista
+                valor_motorista,
+                corrida_para_outra_pessoa,
+                passageiro_embarque_nome,
+                passageiro_embarque_telefone,
+                origem_outra_pessoa
             )
             VALUES (
                 ?,
@@ -6934,7 +7107,11 @@ def api_solicitar_corrida():
             PIX_ADMIN,
             distancia,
             taxa,
-            valor_motorista
+            valor_motorista,
+            corrida_para_outra_pessoa,
+            passageiro_embarque_nome,
+            passageiro_embarque_telefone,
+            origem_outra_pessoa
         ))
 
         conn.commit()
@@ -6987,7 +7164,11 @@ def api_solicitar_corrida():
             pix_chave,
             distancia_km,
             taxa_app,
-            valor_motorista
+            valor_motorista,
+            corrida_para_outra_pessoa,
+            passageiro_embarque_nome,
+            passageiro_embarque_telefone,
+            origem_outra_pessoa
         )
         VALUES (
             ?,
@@ -7017,7 +7198,11 @@ def api_solicitar_corrida():
         PIX_ADMIN,
         distancia,
         taxa,
-        valor_motorista
+        valor_motorista,
+        corrida_para_outra_pessoa,
+        passageiro_embarque_nome,
+        passageiro_embarque_telefone,
+        origem_outra_pessoa
     ))
 
     conn.commit()
