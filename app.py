@@ -144,6 +144,85 @@ def enviar_push_motoristas_online(titulo, corpo, corrida_id=None, passageiro_lat
             continue
 
 
+def enviar_push_passageiros(titulo, corpo):
+    """
+    Envia uma notificação Push para os passageiros que autorizaram notificações.
+    Não altera passageiros, corridas ou pagamentos.
+    """
+    if not VAPID_PUBLIC_KEY or not VAPID_PRIVATE_KEY:
+        print("[PUSH] VAPID não configurado.", flush=True)
+        return {"enviados": 0, "removidas": 0}
+
+    try:
+        from pywebpush import webpush, WebPushException
+    except Exception:
+        return {"enviados": 0, "removidas": 0}
+
+    conn = conectar()
+    inscritos = conn.execute("""
+        SELECT DISTINCT
+            s.id, s.endpoint, s.p256dh, s.auth
+        FROM passageiro_push_subscriptions s
+        INNER JOIN passageiros p ON p.id = s.passageiro_id
+    """).fetchall()
+    conn.close()
+
+    dados = {
+        "title": titulo,
+        "body": corpo,
+        "data": {
+            "url": "/passageiro"
+        }
+    }
+
+    enviados = 0
+    removidas = 0
+
+    for inscrito in inscritos:
+        subscription_info = {
+            "endpoint": inscrito["endpoint"],
+            "keys": {
+                "p256dh": inscrito["p256dh"],
+                "auth": inscrito["auth"]
+            }
+        }
+
+        try:
+            webpush(
+                subscription_info=subscription_info,
+                data=json.dumps(dados),
+                vapid_private_key=VAPID_PRIVATE_KEY,
+                vapid_claims={
+                    "sub": "https://vai-moto.onrender.com"
+                }
+            )
+            enviados += 1
+
+        except WebPushException as erro:
+            status_code = getattr(erro, "status_code", None)
+
+            if status_code in (404, 410):
+                conn = conectar()
+                conn.execute(
+                    "DELETE FROM passageiro_push_subscriptions WHERE id=?",
+                    (inscrito["id"],)
+                )
+                conn.commit()
+                conn.close()
+                removidas += 1
+
+        except Exception:
+            continue
+
+    print(
+        f"[PUSH PASSAGEIROS] Enviados: {enviados} | "
+        f"Inscrições expiradas removidas: {removidas}",
+        flush=True
+    )
+
+    return {"enviados": enviados, "removidas": removidas}
+
+
 def criar_checkout_asaas(corrida_id, valor, origem, destino, pagamento='PIX'):
     """
     Cria um Checkout Asaas para uma corrida.
@@ -434,6 +513,21 @@ def iniciar_banco():
     except Exception:
         pass
 
+    conn.commit()
+
+    # Inscrições de notificações Push dos passageiros.
+    # Tabela independente: não altera usuários, corridas ou pagamentos.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS passageiro_push_subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            passageiro_id INTEGER NOT NULL,
+            endpoint TEXT NOT NULL UNIQUE,
+            p256dh TEXT NOT NULL,
+            auth TEXT NOT NULL,
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            atualizado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
 
     # Inscrições de notificações Push dos motoristas.
@@ -1146,6 +1240,14 @@ def dashboard():
 
     html += """
     <div class="card">
+        <h2>📣 Notificações</h2>
+        <p>Envie avisos e chamadas para passageiros que ativaram o Push.</p>
+        <a class="btn btn-azul" href="/admin/notificacoes-passageiros">
+            📣 NOTIFICAR PASSAGEIROS
+        </a>
+    </div>
+
+    <div class="card">
         <h2>📡 Monitoramento</h2>
         <p>Acompanhe motoristas, GPS e corridas aceitas.</p>
         <a class="btn btn-azul"
@@ -1163,6 +1265,95 @@ def dashboard():
         </a>
     </div>
     """
+
+    return pagina(html)
+
+
+
+@app.route("/admin/notificacoes-passageiros", methods=["GET", "POST"])
+@login_obrigatorio
+def admin_notificacoes_passageiros():
+    resultado = None
+
+    if request.method == "POST":
+        titulo = (request.form.get("titulo") or "").strip()
+        corpo = (request.form.get("corpo") or "").strip()
+
+        if not titulo or not corpo:
+            resultado = "Informe o título e a mensagem."
+        else:
+            envio = enviar_push_passageiros(titulo, corpo)
+            resultado = (
+                "Notificação enviada. "
+                f"Dispositivos notificados: {envio['enviados']}."
+            )
+
+    aviso = ""
+    if resultado:
+        aviso = f'''
+        <div style="padding:15px;border-radius:12px;margin-bottom:18px;
+                    background:#f5f5f5;border-left:5px solid #111;">
+            <b>{resultado}</b>
+        </div>
+        '''
+
+    html = f'''
+    <div class="card">
+        <h2>📣 Notificações para passageiros</h2>
+
+        <p>
+            Envie uma notificação Push para os passageiros que
+            autorizaram notificações no VAI_DE_MOTO.
+        </p>
+
+        {aviso}
+
+        <form method="POST">
+
+            <label><b>Título</b></label>
+
+            <input
+                name="titulo"
+                maxlength="80"
+                required
+                placeholder="🏍️ VAI_DE_MOTO está online!"
+                style="width:100%;padding:14px;margin:8px 0 15px;
+                       box-sizing:border-box;border-radius:10px;
+                       border:1px solid #ccc;"
+            >
+
+            <label><b>Mensagem</b></label>
+
+            <textarea
+                name="corpo"
+                maxlength="180"
+                required
+                rows="4"
+                placeholder="Precisa sair? Solicite sua corrida agora."
+                style="width:100%;padding:14px;margin:8px 0 15px;
+                       box-sizing:border-box;border-radius:10px;
+                       border:1px solid #ccc;resize:vertical;"
+            ></textarea>
+
+            <button
+                type="submit"
+                class="btn btn-azul"
+                onclick="return confirm('Enviar esta notificação para os passageiros que ativaram o Push?')"
+            >
+                📣 ENVIAR NOTIFICAÇÃO
+            </button>
+
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>💡 Exemplo</h2>
+        <p><b>🏍️ VAI_DE_MOTO está online!</b></p>
+        <p>Precisa sair? Solicite sua corrida agora.</p>
+    </div>
+
+    <a class="btn btn-azul" href="/">⬅️ VOLTAR AO PAINEL</a>
+    '''
 
     return pagina(html)
 
@@ -3934,6 +4125,70 @@ setInterval(atualizarMotoristasOnline, 10000);
         </div>
 
 <script>
+async function ativarNotificacoesPassageiro(){
+  try{
+    if(!("serviceWorker" in navigator) || !("PushManager" in window)){
+      alert("Este navegador não suporta notificações Push.");
+      return;
+    }
+
+    const permissao = await Notification.requestPermission();
+
+    if(permissao !== "granted"){
+      alert("Permissão de notificações não autorizada.");
+      return;
+    }
+
+    const registro = await navigator.serviceWorker.ready;
+
+    const resposta = await fetch("/api/push/public-key");
+    const dados = await resposta.json();
+
+    if(!dados.ok || !dados.public_key){
+      alert("Notificações Push não estão configuradas no servidor.");
+      return;
+    }
+
+    function base64ParaUint8Array(base64){
+      const padding = "=".repeat((4 - base64.length % 4) % 4);
+      const base64Url = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const rawData = atob(base64Url);
+      return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+    }
+
+    let inscricao = await registro.pushManager.getSubscription();
+
+    if(!inscricao){
+      inscricao = await registro.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: base64ParaUint8Array(dados.public_key)
+      });
+    }
+
+    const salvar = await fetch("/api/passageiro/push/subscribe", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      credentials:"same-origin",
+      body:JSON.stringify(inscricao.toJSON())
+    });
+
+    const resultado = await salvar.json();
+
+    if(!resultado.ok){
+      throw new Error(
+        resultado.erro || "Não foi possível registrar o dispositivo."
+      );
+    }
+
+    alert("🔔 Notificações do VAI_DE_MOTO ativadas com sucesso!");
+
+  }catch(e){
+    alert("Erro ao ativar notificações: " + e.message);
+  }
+}
+
+window.ativarNotificacoesPassageiro = ativarNotificacoesPassageiro;
+
 async function usarMinhaLocalizacao(){
     const origem = document.getElementById("origem");
     const latInput = document.getElementById("origem_lat");
@@ -4146,6 +4401,9 @@ window.addEventListener("load",iniciarMapaPassageiro);
 
 
 </script>
+
+        <button class="pub-btn pub-yellow" type="button" onclick="window.ativarNotificacoesPassageiro()">🔔 ATIVAR NOTIFICAÇÕES</button>
+        <small>Receba avisos e promoções do VAI_DE_MOTO no seu celular.</small>
 
         <h3>🏁 Destino</h3>
         <input id="destino" class="pub-input" placeholder="Rua, número, bairro ou endereço completo">
@@ -7450,6 +7708,39 @@ def api_motorista_push_subscribe():
             auth=excluded.auth,
             atualizado_em=CURRENT_TIMESTAMP
     """, (mid, endpoint, p256dh, auth))
+
+    conn.commit()
+    conn.close()
+
+    return {"ok": True}
+
+
+@app.route("/api/passageiro/push/subscribe", methods=["POST"])
+def api_passageiro_push_subscribe():
+    pid = _passageiro_logado()
+    if not pid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    data = _json()
+    endpoint = str(data.get("endpoint") or "").strip()
+    keys = data.get("keys") or {}
+    p256dh = str(keys.get("p256dh") or "").strip()
+    auth = str(keys.get("auth") or "").strip()
+
+    if not endpoint or not p256dh or not auth:
+        return {"ok": False, "erro": "Inscrição Push inválida."}, 400
+
+    conn = conectar()
+    conn.execute("""
+        INSERT INTO passageiro_push_subscriptions
+        (passageiro_id, endpoint, p256dh, auth, atualizado_em)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(endpoint) DO UPDATE SET
+            passageiro_id=excluded.passageiro_id,
+            p256dh=excluded.p256dh,
+            auth=excluded.auth,
+            atualizado_em=CURRENT_TIMESTAMP
+    """, (pid, endpoint, p256dh, auth))
 
     conn.commit()
     conn.close()
