@@ -4134,6 +4134,7 @@ async function ativarNotificacoesPassageiro(){
 
     const permissao = await Notification.requestPermission();
 
+      alert("PERMISSAO: " + permissao);
     if(permissao !== "granted"){
       alert("Permissão de notificações não autorizada.");
       return;
