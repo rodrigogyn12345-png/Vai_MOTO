@@ -3797,23 +3797,23 @@ body{background:#f3f4f6!important}
 body{background:#eef3f8!important}
 .pub-nav{background:#fff!important;border:1px solid #e2e8f0!important;border-radius:0 0 18px 18px!important;padding:8px!important;margin:0 -1px 10px!important;box-shadow:0 3px 14px rgba(0,0,0,.10)!important}
 .pub-nav a{color:#334155!important;font-size:14px!important;padding:10px 8px!important}
-.pub-nav a:first-child{background:#0866ff!important;color:#fff!important}
-h2{font-size:22px!important;margin:10px 4px!important;color:#111827!important}
+.pub-nav a:first-child{background:#f2c400!important;color:#fff!important}
+h2{font-size:22px!important;margin:10px 4px!important;color:#111!important}
 #motoristas-online-painel{background:#eff6ff!important;border:1px solid #bfdbfe!important;color:#0759c9!important;border-radius:14px!important;padding:10px!important;margin:8px 0!important;font-size:14px!important}
-#motoristas-online-painel span{color:#0866ff!important;font-size:21px!important}
+#motoristas-online-painel span{color:#f2c400!important;font-size:21px!important}
 .pass-map{height:360px!important;margin:0 -1px 0!important;border:0!important;border-radius:0 0 24px 24px!important;box-shadow:0 5px 18px rgba(0,0,0,.12)!important}
 #passageiroMap{height:100%!important;min-height:0!important}
 .pub-card{background:#fff!important;border:0!important;border-radius:22px!important;padding:16px!important;margin:12px 0!important;box-shadow:0 5px 18px rgba(15,23,42,.10)!important}
-.pub-card h3{font-size:19px!important;border-left:4px solid #0866ff!important;color:#111827!important}
+.pub-card h3{font-size:19px!important;border-left:4px solid #f2c400!important;color:#111!important}
 .pub-input{background:#f8fafc!important;border:1.5px solid #dbe3ec!important;border-radius:13px!important;min-height:50px!important;font-size:16px!important}
-.pub-input:focus{border-color:#0866ff!important;box-shadow:0 0 0 3px rgba(8,102,255,.13)!important}
+.pub-input:focus{border-color:#f2c400!important;box-shadow:0 0 0 3px rgba(242,196,0,.18)!important}
 .pub-btn{border-radius:14px!important;min-height:50px!important;font-size:15px!important}
-.pub-btn.pub-blue{background:#0866ff!important;color:#fff!important}
-.pub-btn.pub-green{background:#111827!important;color:#fff!important}
-.pub-btn.pub-yellow{background:#0866ff!important;color:#fff!important}
-#estimativa{background:#0f172a!important;border:2px solid #0866ff!important;color:#fff!important;border-radius:16px!important}
-#estimativa .pub-price{color:#4da3ff!important}
-#estimativa b{color:#4da3ff!important}
+.pub-btn.pub-blue{background:#f2c400!important;color:#fff!important}
+.pub-btn.pub-green{background:#111!important;color:#fff!important}
+.pub-btn.pub-yellow{background:#f2c400!important;color:#fff!important}
+#estimativa{background:#111!important;border:2px solid #f2c400!important;color:#fff!important;border-radius:16px!important}
+#estimativa .pub-price{color:#f2c400!important}
+#estimativa b{color:#f2c400!important}
 #resultado-endereco .pub-btn{border:1px solid #dbe3ec!important;background:#f8fafc!important}
 #corridas{margin-top:12px!important}
 @media(max-width:600px){.pass-map{height:330px!important}.pub-card{padding:15px!important;border-radius:20px!important}h2{font-size:21px!important}}
