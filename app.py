@@ -4132,6 +4132,7 @@ async function ativarNotificacoesPassageiro(){
       return;
     }
 
+      alert("PERMISSÃO ATUAL: " + Notification.permission);
     const permissao = await Notification.requestPermission();
 
     if(permissao !== "granted"){
