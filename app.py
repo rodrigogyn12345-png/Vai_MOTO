@@ -4419,7 +4419,86 @@ window.addEventListener("load",iniciarMapaPassageiro);
 
 </script>
 
-<script>window.ativarNotificacoesPassageiroBotao = function(){ if(typeof ativarNotificacoesPassageiro === "function"){ return ativarNotificacoesPassageiro(); } alert("❌ Função Push não carregada."); };</script>
+<script>
+window.ativarNotificacoesPassageiroBotao = async function(){
+  try{
+    alert("🔔 Ativando notificações do VAI_DE_MOTO...");
+
+    if(!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)){
+      alert("Este navegador não suporta notificações Push.");
+      return;
+    }
+
+    if(Notification.permission === "denied"){
+      alert("🔕 As notificações estão bloqueadas para este site. Ative-as nas configurações do Chrome.");
+      return;
+    }
+
+    const permissao = await Notification.requestPermission();
+
+    if(permissao !== "granted"){
+      alert("🔕 Permissão de notificações não autorizada.");
+      return;
+    }
+
+    const registro = await navigator.serviceWorker.register("/service-worker.js");
+    await navigator.serviceWorker.ready;
+
+    const resposta = await fetch("/api/push/public-key", {
+      credentials:"same-origin"
+    });
+
+    if(!resposta.ok){
+      throw new Error("Não foi possível obter a configuração Push do servidor.");
+    }
+
+    const dados = await resposta.json();
+
+    if(!dados.ok || !dados.public_key){
+      throw new Error("Notificações Push não estão configuradas no servidor.");
+    }
+
+    function base64ParaUint8Array(base64){
+      const padding = "=".repeat((4 - base64.length % 4) % 4);
+      const base64Url = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+      const rawData = atob(base64Url);
+      return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+    }
+
+    let inscricao = await registro.pushManager.getSubscription();
+
+    if(!inscricao){
+      inscricao = await registro.pushManager.subscribe({
+        userVisibleOnly:true,
+        applicationServerKey:base64ParaUint8Array(dados.public_key)
+      });
+    }
+
+    const salvar = await fetch("/api/passageiro/push/subscribe", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      credentials:"same-origin",
+      body:JSON.stringify(inscricao.toJSON())
+    });
+
+    if(!salvar.ok){
+      throw new Error("O servidor não conseguiu registrar este dispositivo.");
+    }
+
+    const resultado = await salvar.json();
+
+    if(!resultado.ok){
+      throw new Error(resultado.erro || "Não foi possível registrar o dispositivo.");
+    }
+
+    alert("✅ Notificações ativadas com sucesso!");
+
+  }catch(e){
+    console.error("Push passageiro:", e);
+    alert("❌ Erro ao ativar notificações: " + (e.message || e));
+  }
+};
+</script>
         <button class="pub-btn pub-yellow" type="button" onclick="window.ativarNotificacoesPassageiroBotao()">🔔 ATIVAR NOTIFICAÇÕES</button>
         <small>Receba avisos e promoções do VAI_DE_MOTO no seu celular.</small>
 
