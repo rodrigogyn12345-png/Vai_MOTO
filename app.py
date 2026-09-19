@@ -4372,12 +4372,23 @@ window.buscarDestino = async function(){
 };
 let passageiroMap=null;
 let passageiroMarker=null;
+let mapaPassageiroInicializado=false;
 
 function iniciarMapaPassageiro(){
+  if(mapaPassageiroInicializado){
+    if(passageiroMap){
+      setTimeout(function(){
+        passageiroMap.invalidateSize(true);
+      },100);
+    }
+    return;
+  }
+
   const mapa=document.getElementById("passageiroMap");
 
   if(!mapa){
     console.log("Mapa do passageiro: elemento não encontrado.");
+    setTimeout(iniciarMapaPassageiro,500);
     return;
   }
 
@@ -4388,38 +4399,40 @@ function iniciarMapaPassageiro(){
   }
 
   try{
-    if(!passageiroMap){
-      passageiroMap=L.map(mapa,{
-        zoomControl:true,
-        attributionControl:true
-      }).setView([-16.9167,-49.4483],14);
+    mapaPassageiroInicializado=true;
 
-      const camada=L.tileLayer(
-        "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
-        {
-          maxZoom:19,
-          attribution:"© OpenStreetMap"
-        }
-      );
+    passageiroMap=L.map(mapa,{
+      zoomControl:true,
+      attributionControl:true
+    });
 
-      camada.on("tileerror",function(e){
-        console.error("Erro ao carregar tile do mapa:",e);
-      });
+    passageiroMap.setView([-16.9167,-49.4483],14);
 
-      camada.addTo(passageiroMap);
+    const camada=L.tileLayer(
+      "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+      {
+        maxZoom:19,
+        attribution:"© OpenStreetMap"
+      }
+    );
+
+    camada.on("tileerror",function(e){
+      console.error("Erro ao carregar tile do mapa:",e);
+    });
+
+    camada.addTo(passageiroMap);
+
+    function ajustarMapa(){
+      if(passageiroMap){
+        passageiroMap.invalidateSize(true);
+      }
     }
 
-    setTimeout(function(){
-      if(passageiroMap) passageiroMap.invalidateSize(true);
-    },100);
-
-    setTimeout(function(){
-      if(passageiroMap) passageiroMap.invalidateSize(true);
-    },500);
-
-    setTimeout(function(){
-      if(passageiroMap) passageiroMap.invalidateSize(true);
-    },1500);
+    ajustarMapa();
+    setTimeout(ajustarMapa,100);
+    setTimeout(ajustarMapa,500);
+    setTimeout(ajustarMapa,1500);
+    setTimeout(ajustarMapa,3000);
 
     if(navigator.geolocation){
       navigator.geolocation.getCurrentPosition(
@@ -4441,12 +4454,11 @@ function iniciarMapaPassageiro(){
 
           passageiroMap.setView([lat,lon],16);
 
-          setTimeout(function(){
-            passageiroMap.invalidateSize(true);
-          },300);
+          setTimeout(ajustarMapa,300);
         },
         function(erro){
           console.log("GPS do passageiro não disponível:",erro);
+          ajustarMapa();
         },
         {
           enableHighAccuracy:true,
@@ -4456,16 +4468,29 @@ function iniciarMapaPassageiro(){
       );
     }
 
+    console.log("Mapa do passageiro inicializado:",L.version);
+
   }catch(e){
+    mapaPassageiroInicializado=false;
     console.error("Erro ao iniciar mapa do passageiro:",e);
   }
 }
 
 function iniciarMapaPassageiroSeguro(){
-  if(document.readyState==="loading"){
-    document.addEventListener("DOMContentLoaded",iniciarMapaPassageiro);
-  }else{
+  function iniciar(){
     iniciarMapaPassageiro();
+  }
+
+  if(document.readyState==="complete"){
+    setTimeout(iniciar,50);
+  }else{
+    window.addEventListener("load",function(){
+      setTimeout(iniciar,50);
+    },{once:true});
+
+    document.addEventListener("DOMContentLoaded",function(){
+      setTimeout(iniciar,100);
+    },{once:true});
   }
 }
 
