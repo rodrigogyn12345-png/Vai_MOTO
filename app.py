@@ -4419,7 +4419,7 @@ window.addEventListener("load",iniciarMapaPassageiro);
 
 </script>
 
-        <button class="pub-btn pub-yellow" type="button" onclick="window.ativarNotificacoesPassageiro()">🔔 ATIVAR NOTIFICAÇÕES</button>
+        <button class="pub-btn pub-yellow" type="button" onclick="alert('🔔 Botão de notificações acionado!'); if(typeof window.ativarNotificacoesPassageiro === 'function'){window.ativarNotificacoesPassageiro();}else{alert('❌ Função de notificações não carregada.');}">🔔 ATIVAR NOTIFICAÇÕES</button>
         <small>Receba avisos e promoções do VAI_DE_MOTO no seu celular.</small>
 
         <h3>🏁 Destino</h3>
