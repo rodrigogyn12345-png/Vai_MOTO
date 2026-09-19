@@ -7602,6 +7602,10 @@ def api_solicitar_corrida():
                 ?,
                 ?,
                 ?,
+                ?,
+                ?,
+                ?,
+                ?,
                 ?
             )
         """, (
