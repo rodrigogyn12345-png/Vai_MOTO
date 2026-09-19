@@ -4370,6 +4370,8 @@ window.buscarDestino = async function(){
     if(box) box.innerHTML="<div class=\"alert erro\">Erro ao buscar destino: "+(e.message||e)+"</div>";
   }
 };
+</script>
+<script>
 let passageiroMap=null;
 let passageiroMarker=null;
 let mapaPassageiroInicializado=false;
