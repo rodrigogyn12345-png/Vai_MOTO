@@ -150,22 +150,46 @@ def enviar_push_passageiros(titulo, corpo):
     Não altera passageiros, corridas ou pagamentos.
     """
     if not VAPID_PUBLIC_KEY or not VAPID_PRIVATE_KEY:
-        print("[PUSH] VAPID não configurado.", flush=True)
-        return {"enviados": 0, "removidas": 0}
+        print("[PUSH PASSAGEIROS] VAPID não configurado.", flush=True)
+        return {
+            "enviados": 0,
+            "falhas": 0,
+            "removidas": 0,
+            "erro": "VAPID não configurado."
+        }
 
     try:
         from pywebpush import webpush, WebPushException
-    except Exception:
-        return {"enviados": 0, "removidas": 0}
+    except Exception as erro:
+        print(
+            f"[PUSH PASSAGEIROS] pywebpush não disponível: {erro}",
+            flush=True
+        )
+        return {
+            "enviados": 0,
+            "falhas": 0,
+            "removidas": 0,
+            "erro": f"pywebpush: {erro}"
+        }
 
     conn = conectar()
+
     inscritos = conn.execute("""
         SELECT DISTINCT
-            s.id, s.endpoint, s.p256dh, s.auth
+            s.id,
+            s.endpoint,
+            s.p256dh,
+            s.auth
         FROM passageiro_push_subscriptions s
         INNER JOIN passageiros p ON p.id = s.passageiro_id
     """).fetchall()
+
     conn.close()
+
+    print(
+        f"[PUSH PASSAGEIROS] Inscrições encontradas: {len(inscritos)}",
+        flush=True
+    )
 
     dados = {
         "title": titulo,
@@ -176,7 +200,9 @@ def enviar_push_passageiros(titulo, corpo):
     }
 
     enviados = 0
+    falhas = 0
     removidas = 0
+    ultimo_erro = ""
 
     for inscrito in inscritos:
         subscription_info = {
@@ -196,33 +222,67 @@ def enviar_push_passageiros(titulo, corpo):
                     "sub": "https://vai-moto.onrender.com"
                 }
             )
+
             enviados += 1
 
+            print(
+                f"[PUSH PASSAGEIROS] Enviado com sucesso "
+                f"para inscrição {inscrito['id']}.",
+                flush=True
+            )
+
         except WebPushException as erro:
+            falhas += 1
             status_code = getattr(erro, "status_code", None)
+            ultimo_erro = str(erro)
+
+            print(
+                f"[PUSH PASSAGEIROS] WebPushException "
+                f"inscrição {inscrito['id']} | "
+                f"status={status_code} | erro={erro}",
+                flush=True
+            )
 
             if status_code in (404, 410):
                 conn = conectar()
+
                 conn.execute(
-                    "DELETE FROM passageiro_push_subscriptions WHERE id=?",
+                    """
+                    DELETE FROM passageiro_push_subscriptions
+                    WHERE id=?
+                    """,
                     (inscrito["id"],)
                 )
+
                 conn.commit()
                 conn.close()
+
                 removidas += 1
 
-        except Exception:
-            continue
+        except Exception as erro:
+            falhas += 1
+            ultimo_erro = str(erro)
+
+            print(
+                f"[PUSH PASSAGEIROS] Erro na inscrição "
+                f"{inscrito['id']}: {erro}",
+                flush=True
+            )
 
     print(
-        f"[PUSH PASSAGEIROS] Enviados: {enviados} | "
-        f"Inscrições expiradas removidas: {removidas}",
+        f"[PUSH PASSAGEIROS] "
+        f"Enviados: {enviados} | "
+        f"Falhas: {falhas} | "
+        f"Removidas: {removidas}",
         flush=True
     )
 
-    return {"enviados": enviados, "removidas": removidas}
-
-
+    return {
+        "enviados": enviados,
+        "falhas": falhas,
+        "removidas": removidas,
+        "erro": ultimo_erro
+    }
 def criar_checkout_asaas(corrida_id, valor, origem, destino, pagamento='PIX'):
     """
     Cria um Checkout Asaas para uma corrida.
@@ -1284,8 +1344,10 @@ def admin_notificacoes_passageiros():
         else:
             envio = enviar_push_passageiros(titulo, corpo)
             resultado = (
-                "Notificação enviada. "
-                f"Dispositivos notificados: {envio['enviados']}."
+                f"Push processado. "
+                f"Enviados: {envio['enviados']} | "
+                f"Falhas: {envio.get('falhas', 0)} | "
+                f"Inscrições expiradas removidas: {envio['removidas']}."
             )
 
     aviso = ""
