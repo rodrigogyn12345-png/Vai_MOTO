@@ -4126,69 +4126,85 @@ setInterval(atualizarMotoristasOnline, 10000);
 
 <script>
 async function ativarNotificacoesPassageiro(){
-  try{
-    if(!("serviceWorker" in navigator) || !("PushManager" in window)){
-      alert("Este navegador não suporta notificações Push.");
-      return;
-    }
+    try{
+      alert("🔔 Ativando notificações do VAI_DE_MOTO...");
 
-      alert("PERMISSÃO ATUAL: " + Notification.permission);
-    const permissao = await Notification.requestPermission();
+      if(!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)){
+        alert("Este navegador não suporta notificações Push.");
+        return;
+      }
 
-    if(permissao !== "granted"){
-      alert("Permissão de notificações não autorizada.");
-      return;
-    }
+      if(Notification.permission === "denied"){
+        alert("🔕 As notificações estão bloqueadas. Ative-as nas configurações do Chrome para este site.");
+        return;
+      }
 
-    const registro = await navigator.serviceWorker.ready;
+      const permissao = await Notification.requestPermission();
 
-    const resposta = await fetch("/api/push/public-key");
-    const dados = await resposta.json();
+      if(permissao !== "granted"){
+        alert("🔕 Permissão de notificações não autorizada.");
+        return;
+      }
 
-    if(!dados.ok || !dados.public_key){
-      alert("Notificações Push não estão configuradas no servidor.");
-      return;
-    }
+      const registro = await navigator.serviceWorker.register("/service-worker.js");
+      await navigator.serviceWorker.ready;
 
-    function base64ParaUint8Array(base64){
-      const padding = "=".repeat((4 - base64.length % 4) % 4);
-      const base64Url = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
-      const rawData = atob(base64Url);
-      return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
-    }
-
-    let inscricao = await registro.pushManager.getSubscription();
-
-    if(!inscricao){
-      inscricao = await registro.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: base64ParaUint8Array(dados.public_key)
+      const resposta = await fetch("/api/push/public-key", {
+        credentials:"same-origin"
       });
+
+      if(!resposta.ok){
+        throw new Error("Não foi possível obter a configuração Push do servidor.");
+      }
+
+      const dados = await resposta.json();
+
+      if(!dados.ok || !dados.public_key){
+        throw new Error("Notificações Push não estão configuradas no servidor.");
+      }
+
+      function base64ParaUint8Array(base64){
+        const padding = "=".repeat((4 - base64.length % 4) % 4);
+        const base64Url = (base64 + padding).replace(/-/g, "+").replace(/_/g, "/");
+        const rawData = atob(base64Url);
+        return Uint8Array.from([...rawData].map(c => c.charCodeAt(0)));
+      }
+
+      let inscricao = await registro.pushManager.getSubscription();
+
+      if(!inscricao){
+        inscricao = await registro.pushManager.subscribe({
+          userVisibleOnly:true,
+          applicationServerKey:base64ParaUint8Array(dados.public_key)
+        });
+      }
+
+      const salvar = await fetch("/api/passageiro/push/subscribe", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        credentials:"same-origin",
+        body:JSON.stringify(inscricao.toJSON())
+      });
+
+      if(!salvar.ok){
+        throw new Error("O servidor não conseguiu registrar este dispositivo.");
+      }
+
+      const resultado = await salvar.json();
+
+      if(!resultado.ok){
+        throw new Error(resultado.erro || "Não foi possível registrar o dispositivo.");
+      }
+
+      alert("✅ Notificações ativadas com sucesso! Você receberá avisos do VAI_DE_MOTO neste celular.");
+
+    }catch(e){
+      console.error("Push passageiro:", e);
+      alert("❌ Erro ao ativar notificações: " + (e.message || e));
     }
-
-    const salvar = await fetch("/api/passageiro/push/subscribe", {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      credentials:"same-origin",
-      body:JSON.stringify(inscricao.toJSON())
-    });
-
-    const resultado = await salvar.json();
-
-    if(!resultado.ok){
-      throw new Error(
-        resultado.erro || "Não foi possível registrar o dispositivo."
-      );
-    }
-
-    alert("🔔 Notificações do VAI_DE_MOTO ativadas com sucesso!");
-
-  }catch(e){
-    alert("Erro ao ativar notificações: " + e.message);
   }
-}
 
-window.ativarNotificacoesPassageiro = ativarNotificacoesPassageiro;
+  window.ativarNotificacoesPassageiro = ativarNotificacoesPassageiro;
 
 async function usarMinhaLocalizacao(){
     const origem = document.getElementById("origem");
