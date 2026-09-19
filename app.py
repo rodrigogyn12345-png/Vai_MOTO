@@ -205,6 +205,14 @@ def enviar_push_passageiros(titulo, corpo):
     ultimo_erro = ""
 
     for inscrito in inscritos:
+        print(
+            f"[PUSH PASSAGEIROS] Inscrição {inscrito['id']} | "
+            f"endpoint_len={len(inscrito['endpoint'] or '')} | "
+            f"p256dh_len={len(inscrito['p256dh'] or '')} | "
+            f"auth_len={len(inscrito['auth'] or '')}",
+            flush=True
+        )
+
         subscription_info = {
             "endpoint": inscrito["endpoint"],
             "keys": {
