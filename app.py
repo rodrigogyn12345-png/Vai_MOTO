@@ -2828,6 +2828,8 @@ def corridas():
             </div>
 
             <div class="corrida-info">
+                <p>🕐 <b>Horário da chamada:</b> {c["criado_em"] or "-"}</p>
+
                 <p>👤 <b>Passageiro:</b> {passageiro}</p>
 
                 <p>🏍️ <b>Motoqueiro:</b> {motorista}</p>
@@ -3074,6 +3076,7 @@ def corridas():
 
                     <tr>
                         <th>ID</th>
+                        <th>Horário da chamada</th>
                         <th>Passageiro</th>
                         <th>Motoqueiro</th>
                         <th>Origem</th>
@@ -3086,6 +3089,7 @@ def corridas():
                     {''.join(f'''
                     <tr>
                         <td><b>#{c["id"]}</b></td>
+                        <td>{c["criado_em"] or "-"}</td>
 
                         <td>
                             {c["passageiro_nome"] or "Não informado"}
