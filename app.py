@@ -1,5 +1,7 @@
 import unicodedata
 from pathlib import Path
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from flask import send_from_directory, send_file
 import os
 import uuid
@@ -18,6 +20,21 @@ app.secret_key = "VAI_DE_MOTO_CHAVE_TROCAR_DEPOIS"
 app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
 
 DB = "/var/data/vai_de_moto.db"
+
+def formatar_data_brasilia(valor):
+    if not valor:
+        return "-"
+    try:
+        texto = str(valor).strip().replace(" ", "T")
+        dt = datetime.fromisoformat(texto)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(
+            ZoneInfo("America/Sao_Paulo")
+        ).strftime("%d/%m/%Y %H:%M:%S")
+    except Exception:
+        return str(valor)
+
 LIMITE_MOTOQUEIROS = 20
 
 # =========================================================
@@ -2828,7 +2845,7 @@ def corridas():
             </div>
 
             <div class="corrida-info">
-                <p>🕐 <b>Horário da chamada:</b> {c["criado_em"] or "-"}</p>
+                <p>🕐 <b>Horário da chamada:</b> {formatar_data_brasilia(c["criado_em"])}</p>
 
                 <p>👤 <b>Passageiro:</b> {passageiro}</p>
 
@@ -3089,7 +3106,7 @@ def corridas():
                     {''.join(f'''
                     <tr>
                         <td><b>#{c["id"]}</b></td>
-                        <td>{c["criado_em"] or "-"}</td>
+                        <td>{formatar_data_brasilia(c["criado_em"])}</td>
 
                         <td>
                             {c["passageiro_nome"] or "Não informado"}
