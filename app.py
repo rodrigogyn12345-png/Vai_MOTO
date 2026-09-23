@@ -9510,6 +9510,21 @@ def garantir_tabela_saques_carro():
             FOREIGN KEY (motorista_carro_id) REFERENCES motoristas_carro(id)
         )
     """)
+    colunas = {
+        row["name"]
+        for row in conn.execute("PRAGMA table_info(saques_carro)").fetchall()
+    }
+
+    if "taxa_antecipacao" not in colunas:
+        conn.execute(
+            "ALTER TABLE saques_carro ADD COLUMN taxa_antecipacao REAL NOT NULL DEFAULT 0"
+        )
+
+    if "valor_liquido" not in colunas:
+        conn.execute(
+            "ALTER TABLE saques_carro ADD COLUMN valor_liquido REAL NOT NULL DEFAULT 0"
+        )
+
     conn.commit()
     conn.close()
 
@@ -9581,13 +9596,18 @@ def api_motorista_carro_saque():
             "erro": f"Saldo disponível insuficiente. Disponível: R$ {max(disponivel, 0):.2f}"
         }, 400
 
+    taxa_antecipacao = round(valor * 0.05, 2)
+    valor_liquido = round(valor - taxa_antecipacao, 2)
+
     conn.execute("""
         INSERT INTO saques_carro
-        (motorista_carro_id, valor, pix_chave, pix_tipo, status)
-        VALUES (?, ?, ?, ?, 'PENDENTE')
+        (motorista_carro_id, valor, taxa_antecipacao, valor_liquido, pix_chave, pix_tipo, status)
+        VALUES (?, ?, ?, ?, ?, ?, 'PENDENTE')
     """, (
         motorista_carro["id"],
         round(valor, 2),
+        taxa_antecipacao,
+        valor_liquido,
         str(data.get("pix_chave") or ""),
         str(data.get("pix_tipo") or "")
     ))
