@@ -8705,6 +8705,52 @@ def api_solicitar_corrida_carro():
 # Armazenamento separado de VAI_DE_MOTO
 # =========================================================
 
+@app.route("/api/motorista-carro/me")
+def api_motorista_carro_me():
+    motorista_carro = _motorista_carro_logado()
+    if not motorista_carro:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    return {
+        "ok": True,
+        "motorista": {
+            "id": motorista_carro["id"],
+            "nome": motorista_carro["nome"],
+            "status": motorista_carro["status"],
+            "conexao": motorista_carro["conexao"],
+        }
+    }
+
+
+@app.route("/api/motorista-carro/status", methods=["POST"])
+def api_motorista_carro_status():
+    motorista_carro = _motorista_carro_logado()
+    if not motorista_carro:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    data = request.get_json(silent=True) or {}
+    conexao = str(data.get("conexao") or "").strip().lower()
+
+    if conexao not in ("online", "offline"):
+        return {"ok": False, "erro": "Status inválido."}, 400
+
+    if motorista_carro["status"] != "aprovado":
+        return {"ok": False, "erro": "Motorista não aprovado."}, 403
+
+    conn = conectar()
+    conn.execute(
+        "UPDATE motoristas_carro SET conexao=? WHERE id=?",
+        (conexao, motorista_carro["id"])
+    )
+    conn.commit()
+    conn.close()
+
+    return {
+        "ok": True,
+        "conexao": conexao
+    }
+
+
 @app.route("/api/motorista-carro/corridas-pendentes")
 def api_motorista_carro_corridas_pendentes():
     motorista_carro = _motorista_carro_logado()

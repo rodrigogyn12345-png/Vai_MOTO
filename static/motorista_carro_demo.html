@@ -1303,9 +1303,32 @@ async function atualizarEstatisticasCarro(){
   }
 }
 
-function alternarStatus(){
+async function alternarStatus(){
 
-  online = !online;
+  const novoStatus = online ? "offline" : "online";
+
+  try {
+    const respostaStatus = await fetch("/api/motorista-carro/status", {
+      method: "POST",
+      headers: {"Content-Type":"application/json"},
+      credentials: "same-origin",
+      body: JSON.stringify({conexao: novoStatus})
+    });
+
+    const dadosStatus = await respostaStatus.json();
+
+    if(!respostaStatus.ok || !dadosStatus.ok){
+      alert(dadosStatus.erro || "Não foi possível alterar o status.");
+      return;
+    }
+
+    online = novoStatus === "online";
+
+  } catch(erro) {
+    console.log("Erro ao alterar status do motorista de carro:", erro);
+    alert("Não foi possível conectar ao servidor.");
+    return;
+  }
 
   const pill = document.getElementById("statusPill");
   const text = document.getElementById("statusText");
