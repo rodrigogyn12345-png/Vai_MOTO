@@ -1487,6 +1487,15 @@ def dashboard():
             💰 ABRIR SAQUES
         </a>
     </div>
+
+    <div class="card">
+        <h2>🚗💰 Saques VAI_DE_CARRO</h2>
+        <p>Veja, pague ou cancele as solicitações de saque dos motoristas de carro.</p>
+        <a class="btn btn-azul"
+           href="/saques-carro">
+            🚗💰 ABRIR SAQUES DE CARRO
+        </a>
+    </div>
     """
 
     return pagina(html)
