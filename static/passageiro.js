@@ -1215,3 +1215,17 @@ window.selecionarVeiculoDemo = function(tipo) {
 };
 
 console.log("VAI_DE_MOTO: seletor de veiculo carregado");
+
+/* CLIQUE DIRETO NOS BOTOES DE VEICULO */
+document.addEventListener("click", function(event) {
+  const botao = event.target.closest("#btnMotoDemo, #btnCarroDemo");
+  if (!botao) return;
+
+  if (botao.id === "btnCarroDemo") {
+    window.selecionarVeiculoDemo("CARRO");
+  } else {
+    window.selecionarVeiculoDemo("MOTO");
+  }
+});
+
+console.log("VAI_DE_MOTO: eventos dos botoes de veiculo ativos");
