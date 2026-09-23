@@ -6220,7 +6220,7 @@ async function solicitar(){
 
 })();
 
-    <script src="/static/passageiro.js?v=3"></script>
+    <script src="/static/passageiro.js?v=9"></script>
     """, manifesto="passageiro")
 
 
