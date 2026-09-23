@@ -106,7 +106,15 @@ window.buscarDestino = async function(){
 
 
 window.msg=function(t,cls="alert"){const e=document.getElementById("mensagem");if(e)e.innerHTML="<div class=\"alert "+cls+"\">"+t+"</div>";};
-window.calcular=async function(){const aLat=document.getElementById("origem_lat").value,aLon=document.getElementById("origem_lon").value,dLat=document.getElementById("dest_lat").value,dLon=document.getElementById("dest_lon").value;if(!aLat||!aLon){window.msg("Use o GPS para definir a origem.","erro");return;}if(!dLat||!dLon){window.msg("Busque e selecione o destino.","erro");return;}try{const r=await fetch("/api/calcular-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({origem_lat:aLat,origem_lon:aLon,dest_lat:dLat,dest_lon:dLon}),credentials:"same-origin",cache:"no-store"}),d=await r.json();if(!d.ok){window.msg(d.erro||"Não foi possível calcular.","erro");return;}const e=document.getElementById("estimativa");if(e){e.style.display="block";e.innerHTML="<b>Distância:</b> "+d.distancia_km.toFixed(2)+" km<br><div class=\"pub-price\">R$ "+d.valor.toFixed(2)+"</div><small>Taxa do aplicativo: R$ "+d.taxa_app.toFixed(2)+" · Motorista: R$ "+d.valor_motorista.toFixed(2)+"</small>";}const b=document.getElementById("solicitar");if(b)b.style.display="block";window._corrida=d;}catch(e){window.msg("Erro ao calcular a corrida. Tente novamente.","erro");}};
+window.calcular=async function(){const aLat=document.getElementById("origem_lat").value,aLon=document.getElementById("origem_lon").value,dLat=document.getElementById("dest_lat").value,dLon=document.getElementById("dest_lon").value;if(!aLat||!aLon){window.msg("Use o GPS para definir a origem.","erro");return;}if(!dLat||!dLon){window.msg("Busque e selecione o destino.","erro");return;}try{const r=await fetch("/api/calcular-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({origem_lat:aLat,origem_lon:aLon,dest_lat:dLat,dest_lon:dLon}),credentials:"same-origin",cache:"no-store"}),d=await r.json();if(!d.ok){window.msg(d.erro||"Não foi possível calcular.","erro");return;}if(window.veiculoDemoSelecionado === "CARRO"){
+const km=Number(d.distancia_km||0);
+const valorCarro=km<=4?10:(10+(km-4)*3.5);
+d.valor=Number(valorCarro.toFixed(2));
+d.taxa_app=Number((d.valor*0.09).toFixed(2));
+d.valor_motorista=Number((d.valor*0.91).toFixed(2));
+d.veiculo_demo="CARRO";
+}
+const e=document.getElementById("estimativa");if(e){e.style.display="block";e.innerHTML="<b>🚗 Tipo:</b> "+(window.veiculoDemoSelecionado==="CARRO"?"VAI_DE_CARRO":"VAI_DE_MOTO")+"<br><b>Distância:</b> "+d.distancia_km.toFixed(2)+" km<br><div class=\"pub-price\">R$ "+d.valor.toFixed(2)+"</div><small>Taxa do aplicativo: R$ "+d.taxa_app.toFixed(2)+" · Motorista: R$ "+d.valor_motorista.toFixed(2)+"</small>";}const b=document.getElementById("solicitar");if(b)b.style.display="block";window._corrida=d;}catch(e){window.msg("Erro ao calcular a corrida. Tente novamente.","erro");}};
 console.log("VAI_DE_MOTO: passageiro.js carregado");
 
 
