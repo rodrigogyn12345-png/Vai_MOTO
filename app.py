@@ -4810,9 +4810,11 @@ window.ativarNotificacoesPassageiroBotao = async function(){
 
 <script>
 let veiculoDemoSelecionado = "MOTO";
+window.veiculoDemoSelecionado = veiculoDemoSelecionado;
 
 window.selecionarVeiculoDemo = function(tipo){
   veiculoDemoSelecionado = tipo;
+  window.veiculoDemoSelecionado = tipo;
 
   const texto = document.getElementById("veiculo-demo-selecionado");
   const moto = document.getElementById("btnMotoDemo");
