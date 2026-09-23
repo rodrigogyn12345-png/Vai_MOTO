@@ -1195,3 +1195,23 @@ window.carregarCorridas = async function carregarCorridas(){
   }
 
   
+/* SELETOR DE VEICULO - VAI_DE_CARRO */
+window.selecionarVeiculoDemo = function(tipo) {
+  window.veiculoDemoSelecionado = tipo;
+
+  const texto = document.getElementById("veiculo-demo-selecionado");
+  const moto = document.getElementById("btnMotoDemo");
+  const carro = document.getElementById("btnCarroDemo");
+
+  if (tipo === "CARRO") {
+    if (texto) texto.textContent = "🚗 VAI_DE_CARRO selecionado";
+    if (moto) moto.style.opacity = "0.55";
+    if (carro) carro.style.opacity = "1";
+  } else {
+    if (texto) texto.textContent = "🏍️ VAI_DE_MOTO selecionado";
+    if (moto) moto.style.opacity = "1";
+    if (carro) carro.style.opacity = "0.55";
+  }
+};
+
+console.log("VAI_DE_MOTO: seletor de veiculo carregado");
