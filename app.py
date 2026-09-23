@@ -4283,13 +4283,13 @@ setInterval(atualizarMotoristasOnline, 10000);
 
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <button type="button" class="pub-btn pub-yellow" id="btnMotoDemo"
-                    onclick="selecionarVeiculoDemo('MOTO')">
+                    onclick="window.selecionarVeiculoDemo('MOTO')">
               🏍️ VAI_DE_MOTO<br>
               <small style="font-size:13px;">R$ 2,00/km</small>
             </button>
 
             <button type="button" class="pub-btn" id="btnCarroDemo"
-                    onclick="selecionarVeiculoDemo('CARRO')"
+                    onclick="window.selecionarVeiculoDemo('CARRO')"
                     style="background:#2563eb;color:white;">
               🚗 VAI_DE_CARRO<br>
               <small style="font-size:13px;">R$ 4,00/km</small>
