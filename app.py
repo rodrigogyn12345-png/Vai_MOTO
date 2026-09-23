@@ -10184,6 +10184,48 @@ def admin_saques_carro():
         taxa = float(s["taxa_antecipacao"] or 0)
         liquido = float(s["valor_liquido"] or (valor - taxa))
 
+        botoes = ""
+        if status == "PENDENTE":
+            botoes = f"""
+            <form method="POST"
+                  action="/saques-carro/status/{s["id"]}/PAGO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#16833b;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Confirmar este saque como PAGO?')">
+                    ✅ MARCAR COMO PAGO
+                </button>
+            </form>
+
+            <form method="POST"
+                  action="/saques-carro/status/{s["id"]}/CANCELADO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#b00000;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Cancelar este saque?')">
+                    ❌ CANCELAR SAQUE
+                </button>
+            </form>
+            """
+
         cards += f"""
         <div style="
             background:#fff;
