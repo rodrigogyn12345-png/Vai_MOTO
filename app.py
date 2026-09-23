@@ -21,6 +21,86 @@ app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
 
 DB = "/var/data/vai_de_moto.db"
 
+# =========================================================
+# VAI_DE_CARRO — ARMAZENAMENTO SEPARADO
+# =========================================================
+# Em produção, o arquivo fica no disco persistente do Render.
+# No Termux/local, usa um arquivo separado no projeto.
+def criar_checkout_asaas_carro(corrida_id, valor, origem, destino, pagamento="PIX"):
+    """Cria Checkout Asaas exclusivo para VAI_DE_CARRO."""
+    if not ASAAS_API_KEY:
+        return None, None, "ASAAS_API_KEY não configurada."
+
+    pagamento = str(pagamento or "PIX").upper().strip()
+
+    if pagamento not in ("PIX", "CARTAO"):
+        return None, None, "Pagamento online deve ser PIX ou CARTAO."
+
+    payload = {
+        "billingTypes": ["CREDIT_CARD"] if pagamento == "CARTAO" else ["PIX"],
+        "chargeTypes": ["DETACHED"],
+        "minutesToExpire": 60,
+        "externalReference": f"carro-{corrida_id}",
+        "callback": {
+            "successUrl": f"{request.url_root.rstrip('/')}/passageiro",
+            "cancelUrl": f"{request.url_root.rstrip('/')}/passageiro",
+            "expiredUrl": f"{request.url_root.rstrip('/')}/passageiro"
+        },
+        "items": [{
+            "name": f"Corrida VAI_DE_CARRO #{corrida_id}",
+            "description": f"{origem} → {destino}",
+            "quantity": 1,
+            "value": float(valor)
+        }]
+    }
+
+    try:
+        req = Request(
+            ASAAS_BASE_URL + "/checkouts",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "VAI_DE_CARRO/1.0",
+                "access_token": ASAAS_API_KEY
+            },
+            method="POST"
+        )
+
+        with urlopen(req, timeout=20) as resp:
+            dados = json.loads(resp.read().decode("utf-8"))
+
+        checkout_id = dados.get("id")
+        checkout_url = dados.get("link") or dados.get("url") or ""
+
+        if not checkout_id or not checkout_url:
+            return None, None, "Asaas não retornou o ID ou link do Checkout."
+
+        return checkout_id, checkout_url, None
+
+    except Exception as erro:
+        return None, None, f"Erro ao criar Checkout Asaas: {erro}"
+
+
+ARQUIVO_CORRIDAS_CARRO = (
+    "/var/data/corridas_carro.json"
+    if os.path.isdir("/var/data")
+    else "corridas_carro.json"
+)
+
+def carregar_corridas_carro():
+    try:
+        with open(ARQUIVO_CORRIDAS_CARRO, "r", encoding="utf-8") as f:
+            dados = json.load(f)
+            return dados if isinstance(dados, list) else []
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def salvar_corridas_carro():
+    with open(ARQUIVO_CORRIDAS_CARRO, "w", encoding="utf-8") as f:
+        json.dump(CORRIDAS_CARRO, f, ensure_ascii=False, indent=2)
+
+CORRIDAS_CARRO = carregar_corridas_carro()
+
 def formatar_data_brasilia(valor):
     if not valor:
         return "-"
@@ -4198,6 +4278,32 @@ setInterval(atualizarMotoristasOnline, 10000);
         <button class="pub-btn pub-blue" type="button" onclick="fetch(&quot;/static/passageiro.js?v=8&quot;).then(function(r){return r.text()}).then(function(c){eval(c);alert(&quot;JS EXECUTADO&quot;);window.usarMinhaLocalizacao()}).catch(function(e){alert(&quot;ERRO: &quot;+e.message)})">🎯 USAR MINHA LOCALIZAÇÃO</button>
          <small>O GPS tentará mostrar rua, número e bairro.</small>
 
+        <div class="pub-card" style="margin-top:14px;">
+          <label class="pub-label">🚘 Escolha o tipo de veículo</label>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <button type="button" class="pub-btn pub-yellow" id="btnMotoDemo"
+                    onclick="selecionarVeiculoDemo('MOTO')">
+              🏍️ VAI_DE_MOTO<br>
+              <small style="font-size:13px;">R$ 2,00/km</small>
+            </button>
+
+            <button type="button" class="pub-btn" id="btnCarroDemo"
+                    onclick="selecionarVeiculoDemo('CARRO')"
+                    style="background:#2563eb;color:white;">
+              🚗 VAI_DE_CARRO<br>
+              <small style="font-size:13px;">R$ 4,00/km</small>
+            </button>
+          </div>
+
+          <div id="veiculo-demo-selecionado"
+               style="margin-top:10px;text-align:center;font-weight:800;">
+            🏍️ VAI_DE_MOTO selecionado
+          </div>
+
+          <small>Escolha o veículo que deseja para sua corrida.</small>
+        </div>
+
         <div class="outra-pessoa-box">
           <label class="pub-label">👤 Quem vai embarcar?</label>
           <label class="outra-pessoa-option">
@@ -4703,6 +4809,26 @@ window.ativarNotificacoesPassageiroBotao = async function(){
       </div>
 
 <script>
+let veiculoDemoSelecionado = "MOTO";
+
+function selecionarVeiculoDemo(tipo){
+  veiculoDemoSelecionado = tipo;
+
+  const texto = document.getElementById("veiculo-demo-selecionado");
+  const moto = document.getElementById("btnMotoDemo");
+  const carro = document.getElementById("btnCarroDemo");
+
+  if(tipo === "CARRO"){
+    if(texto) texto.textContent = "🚗 VAI_DE_CARRO selecionado — R$ 4,00/km";
+    if(moto) moto.style.opacity = "0.55";
+    if(carro) carro.style.opacity = "1";
+  }else{
+    if(texto) texto.textContent = "🏍️ VAI_DE_MOTO selecionado — R$ 2,00/km";
+    if(moto) moto.style.opacity = "1";
+    if(carro) carro.style.opacity = "0.55";
+  }
+}
+
 function msg(t, cls="alert"){document.getElementById("mensagem").innerHTML='<div class="alert '+cls+'">'+t+'</div>';}
 async function usarGPS(){
   if(!navigator.geolocation){msg("Seu navegador não suporta GPS.","erro");return;}
@@ -4753,8 +4879,23 @@ async function calcular(){
     const r=await fetch("/api/calcular-corrida",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({origem_lat:aLat,origem_lon:aLon,dest_lat:dLat,dest_lon:dLon})});
     const d=await r.json();
     if(!d.ok){msg(d.erro||"Não foi possível calcular.","erro");return;}
+    if(veiculoDemoSelecionado === "CARRO"){
+      const valorCarro = Number(d.distancia_km || 0) * 4.00;
+      d.valor = Number(valorCarro.toFixed(2));
+      d.taxa_app = Number((d.valor * 0.09).toFixed(2));
+      d.valor_motorista = Number((d.valor * 0.91).toFixed(2));
+      d.veiculo_demo = "CARRO";
+    }else{
+      d.veiculo_demo = "MOTO";
+    }
+
     document.getElementById("estimativa").style.display="block";
-    document.getElementById("estimativa").innerHTML='<b>Distância:</b> '+d.distancia_km.toFixed(2)+' km<br><div class="pub-price">R$ '+d.valor.toFixed(2)+'</div><small>Taxa do aplicativo: R$ '+d.taxa_app.toFixed(2)+' · Motorista: R$ '+d.valor_motorista.toFixed(2)+'</small>';
+    document.getElementById("estimativa").innerHTML=
+      '<b>🚘 Tipo:</b> '+(veiculoDemoSelecionado === "CARRO" ? "VAI_DE_CARRO" : "VAI_DE_MOTO")+
+      '<br><b>Distância:</b> '+d.distancia_km.toFixed(2)+' km'+
+      '<br><div class="pub-price">R$ '+d.valor.toFixed(2)+'</div>'+
+      '<small>Taxa do aplicativo: R$ '+d.taxa_app.toFixed(2)+' · Motorista: R$ '+d.valor_motorista.toFixed(2)+'</small>';
+
     document.getElementById("solicitar").style.display="block";
     window._corrida=d;
   } catch(e) {
@@ -4801,6 +4942,15 @@ function alternarOutraPessoa(){
 async function solicitar(){
   if(!window._corrida){
     msg("Calcule a corrida primeiro.","erro");
+    return;
+  }
+
+  if(veiculoDemoSelecionado === "CARRO"){
+    msg(
+      "🚗 VAI_DE_CARRO está em modo demonstração. " +
+      "O cálculo de R$ 4,00/km é apenas para teste e nenhuma corrida de carro será enviada.",
+      "alert"
+    );
     return;
   }
 
@@ -7813,6 +7963,487 @@ def api_solicitar_corrida():
         "checkout_url": checkout_url
     }
 
+
+
+@app.route("/api/solicitar-corrida-carro", methods=["POST"])
+def api_solicitar_corrida_carro():
+    pid = _passageiro_logado()
+
+    if not pid:
+        return {
+            "ok": False,
+            "erro": "Faça login como passageiro."
+        }, 401
+
+    data = _json()
+
+    origem = (data.get("origem") or "").strip()
+    destino = (data.get("destino") or "").strip()
+
+    try:
+        origem_lat = float(data.get("origem_lat"))
+        origem_lon = float(data.get("origem_lon"))
+        dest_lat = float(data.get("dest_lat"))
+        dest_lon = float(data.get("dest_lon"))
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "erro": "Localização da origem ou destino inválida."
+        }, 400
+
+    try:
+        distancia = float(data.get("distancia_km") or 0)
+    except (TypeError, ValueError):
+        distancia = 0
+
+    if distancia <= 0:
+        distancia = _distancia_km(
+            origem_lat,
+            origem_lon,
+            dest_lat,
+            dest_lon
+        )
+
+    if not origem or not destino or distancia <= 0:
+        return {
+            "ok": False,
+            "erro": "Origem, destino e distância são obrigatórios."
+        }, 400
+
+    # ========================================================
+    # TARIFA VAI_DE_CARRO
+    # Até 4 km = R$ 10,00
+    # Acima de 4 km = R$ 10,00 + R$ 3,50/km excedente
+    # ========================================================
+    if distancia <= 4:
+        valor = 10.00
+    else:
+        valor = 10.00 + ((distancia - 4.00) * 3.50)
+
+    valor = round(valor, 2)
+
+    # Taxa do aplicativo: 9%
+    taxa_app = round(valor * 0.09, 2)
+    valor_motorista = round(valor - taxa_app, 2)
+
+    pagamento = (
+        data.get("pagamento") or "DINHEIRO"
+    ).upper().strip()
+
+    if pagamento not in ("DINHEIRO", "PIX", "CARTAO"):
+        return {
+            "ok": False,
+            "erro": "Escolha Dinheiro, PIX ou Cartão."
+        }, 400
+
+    corrida_para_outra_pessoa = int(
+        data.get("corrida_para_outra_pessoa") or 0
+    )
+
+    passageiro_embarque_nome = (
+        data.get("passageiro_embarque_nome") or ""
+    ).strip()
+
+    passageiro_embarque_telefone = (
+        data.get("passageiro_embarque_telefone") or ""
+    ).strip()
+
+    origem_outra_pessoa = (
+        data.get("origem_outra_pessoa") or ""
+    ).strip()
+
+    novo_id = 1
+
+    if CORRIDAS_CARRO:
+        try:
+            novo_id = max(
+                int(item.get("id", 0))
+                for item in CORRIDAS_CARRO
+            ) + 1
+        except (TypeError, ValueError):
+            novo_id = len(CORRIDAS_CARRO) + 1
+
+    aguardando_pagamento = pagamento in ("PIX", "CARTAO")
+
+    corrida = {
+        "id": novo_id,
+        "passageiro_id": pid,
+        "motorista_id": None,
+        "origem": origem,
+        "destino": destino,
+        "origem_lat": origem_lat,
+        "origem_lon": origem_lon,
+        "dest_lat": dest_lat,
+        "dest_lon": dest_lon,
+        "distancia_km": round(distancia, 2),
+        "valor": valor,
+        "taxa_app": taxa_app,
+        "valor_motorista": valor_motorista,
+        "pagamento": pagamento,
+        "pagamento_status": (
+            "NAO_APLICAVEL"
+            if pagamento == "DINHEIRO"
+            else "PENDENTE"
+        ),
+        "status": (
+            "AGUARDANDO_PAGAMENTO"
+            if aguardando_pagamento
+            else "PENDENTE"
+        ),
+        "corrida_para_outra_pessoa": corrida_para_outra_pessoa,
+        "passageiro_embarque_nome": passageiro_embarque_nome,
+        "passageiro_embarque_telefone": passageiro_embarque_telefone,
+        "origem_outra_pessoa": origem_outra_pessoa,
+        "criado_em": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "asaas_checkout_id": "",
+        "asaas_checkout_url": ""
+    }
+
+    CORRIDAS_CARRO.append(corrida)
+    salvar_corridas_carro()
+
+    # DINHEIRO: já pode procurar motorista.
+    if pagamento == "DINHEIRO":
+        return {
+            "ok": True,
+            "id": novo_id,
+            "valor": valor,
+            "taxa_app": taxa_app,
+            "valor_motorista": valor_motorista,
+            "distancia_km": round(distancia, 2),
+            "pagamento": pagamento,
+            "pagamento_status": "NAO_APLICAVEL",
+            "status": "PENDENTE",
+            "veiculo": "CARRO"
+        }
+
+    # PIX / CARTÃO: criar Checkout Asaas antes de liberar a corrida.
+    checkout_id, checkout_url, erro_asaas = criar_checkout_asaas_carro(
+        novo_id,
+        valor,
+        origem,
+        destino,
+        pagamento
+    )
+
+    if erro_asaas:
+        if corrida in CORRIDAS_CARRO:
+            CORRIDAS_CARRO.remove(corrida)
+            salvar_corridas_carro()
+
+        return {
+            "ok": False,
+            "erro": erro_asaas
+        }, 500
+
+    corrida["asaas_checkout_id"] = checkout_id
+    corrida["asaas_checkout_url"] = checkout_url
+    salvar_corridas_carro()
+
+    return {
+        "ok": True,
+        "id": novo_id,
+        "valor": valor,
+        "taxa_app": taxa_app,
+        "valor_motorista": valor_motorista,
+        "distancia_km": round(distancia, 2),
+        "pagamento": pagamento,
+        "pagamento_status": "PENDENTE",
+        "status": "AGUARDANDO_PAGAMENTO",
+        "checkout_url": checkout_url,
+        "veiculo": "CARRO"
+    }
+
+
+
+# =========================================================
+# VAI_DE_CARRO — APIs DO MOTORISTA
+# Armazenamento separado de VAI_DE_MOTO
+# =========================================================
+
+@app.route("/api/motorista-carro/corridas-pendentes")
+def api_motorista_carro_corridas_pendentes():
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Faça login como motorista."}, 401
+
+    conn = conectar()
+    m = conn.execute(
+        "SELECT status, conexao FROM motoqueiros WHERE id=?",
+        (mid,)
+    ).fetchone()
+    conn.close()
+
+    if not m or m["status"] != "aprovado":
+        return {"ok": False, "erro": "Motorista não aprovado."}, 403
+
+    if m["conexao"] != "online":
+        return {"ok": True, "corridas": []}
+
+    pendentes = []
+    for corrida in CORRIDAS_CARRO:
+        if corrida.get("status") != "PENDENTE":
+            continue
+        if corrida.get("motorista_id") is not None:
+            continue
+        pendentes.append(corrida)
+
+    pendentes.sort(
+        key=lambda item: item.get("id", 0),
+        reverse=True
+    )
+
+    return {"ok": True, "corridas": pendentes[:20]}
+
+
+@app.route("/api/motorista-carro/aceitar/<int:id>", methods=["POST"])
+def api_motorista_carro_aceitar(id):
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    conn = conectar()
+    m = conn.execute(
+        "SELECT status, conexao FROM motoqueiros WHERE id=?",
+        (mid,)
+    ).fetchone()
+    conn.close()
+
+    if not m or m["status"] != "aprovado" or m["conexao"] != "online":
+        return {
+            "ok": False,
+            "erro": "Fique online e esteja aprovado para aceitar."
+        }, 403
+
+    corrida = next(
+        (
+            c for c in CORRIDAS_CARRO
+            if int(c.get("id", 0)) == id
+        ),
+        None
+    )
+
+    if not corrida:
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida.get("status") != "PENDENTE" or corrida.get("motorista_id") is not None:
+        return {
+            "ok": False,
+            "erro": "Essa corrida já foi aceita por outro motorista."
+        }, 409
+
+    corrida["motorista_id"] = mid
+    corrida["status"] = "ACEITA"
+    corrida["aceita_em"] = datetime.now().isoformat(timespec="seconds")
+
+    salvar_corridas_carro()
+
+    return {"ok": True, "corrida": corrida}
+
+
+@app.route("/api/motorista-carro/cheguei/<int:id>", methods=["POST"])
+def api_motorista_carro_cheguei(id):
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    corrida = next(
+        (
+            c for c in CORRIDAS_CARRO
+            if int(c.get("id", 0)) == id
+        ),
+        None
+    )
+
+    if not corrida:
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida.get("motorista_id") != mid:
+        return {"ok": False, "erro": "Essa corrida não pertence a você."}, 403
+
+    if corrida.get("status") != "ACEITA":
+        return {
+            "ok": False,
+            "erro": "A corrida precisa estar aceita para registrar a chegada."
+        }, 400
+
+    corrida["status"] = "CHEGOU"
+    corrida["chegou_em"] = datetime.now().isoformat(timespec="seconds")
+
+    salvar_corridas_carro()
+
+    return {"ok": True, "corrida": corrida}
+
+
+@app.route("/api/motorista-carro/iniciar/<int:id>", methods=["POST"])
+def api_motorista_carro_iniciar(id):
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    corrida = next(
+        (
+            c for c in CORRIDAS_CARRO
+            if int(c.get("id", 0)) == id
+        ),
+        None
+    )
+
+    if not corrida:
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida.get("motorista_id") != mid:
+        return {"ok": False, "erro": "Essa corrida não pertence a você."}, 403
+
+    if corrida.get("status") != "CHEGOU":
+        return {
+            "ok": False,
+            "erro": "Registre CHEGUEI AO PASSAGEIRO antes de iniciar."
+        }, 400
+
+    corrida["status"] = "EM_ANDAMENTO"
+    corrida["iniciado_em"] = datetime.now().isoformat(timespec="seconds")
+
+    salvar_corridas_carro()
+
+    return {"ok": True, "corrida": corrida}
+
+
+
+@app.route("/api/motorista-carro/receber-dinheiro/<int:id>", methods=["POST"])
+def api_motorista_carro_receber_dinheiro(id):
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    corrida = next(
+        (c for c in CORRIDAS_CARRO if int(c.get("id", 0)) == id),
+        None
+    )
+
+    if not corrida:
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida.get("motorista_id") != mid:
+        return {"ok": False, "erro": "Essa corrida não pertence a você."}, 403
+
+    if str(corrida.get("pagamento") or "").upper() != "DINHEIRO":
+        return {
+            "ok": False,
+            "erro": "Esta corrida não possui pagamento em dinheiro."
+        }, 400
+
+    if corrida.get("status") != "EM_ANDAMENTO":
+        return {
+            "ok": False,
+            "erro": "A corrida precisa estar em andamento."
+        }, 400
+
+    corrida["pagamento_status"] = "RECEBIDO"
+    corrida["recebido_em"] = datetime.now().isoformat(timespec="seconds")
+
+    salvar_corridas_carro()
+
+    return {"ok": True, "corrida": corrida}
+
+
+@app.route("/api/motorista-carro/finalizar/<int:id>", methods=["POST"])
+def api_motorista_carro_finalizar(id):
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    corrida = next(
+        (c for c in CORRIDAS_CARRO if int(c.get("id", 0)) == id),
+        None
+    )
+
+    if not corrida:
+        return {"ok": False, "erro": "Corrida não encontrada."}, 404
+
+    if corrida.get("motorista_id") != mid:
+        return {"ok": False, "erro": "Essa corrida não pertence a você."}, 403
+
+    if corrida.get("status") != "EM_ANDAMENTO":
+        return {
+            "ok": False,
+            "erro": "A corrida precisa estar em andamento."
+        }, 400
+
+    pagamento = str(corrida.get("pagamento") or "").upper()
+    pagamento_status = str(
+        corrida.get("pagamento_status") or ""
+    ).upper()
+
+    if pagamento == "DINHEIRO":
+        if pagamento_status != "RECEBIDO":
+            return {
+                "ok": False,
+                "erro": "Confirme o recebimento do dinheiro antes de finalizar."
+            }, 400
+
+    elif pagamento in ("PIX", "CARTAO"):
+        if pagamento_status not in ("PAGO", "CONFIRMADO"):
+            return {
+                "ok": False,
+                "erro": "O pagamento online ainda não foi confirmado."
+            }, 400
+
+    else:
+        return {
+            "ok": False,
+            "erro": "Forma de pagamento inválida."
+        }, 400
+
+    corrida["status"] = "CONCLUIDA"
+    corrida["concluido_em"] = datetime.now().isoformat(timespec="seconds")
+
+    salvar_corridas_carro()
+
+    return {"ok": True, "corrida": corrida}
+
+
+@app.route("/api/motorista-carro/estatisticas")
+def api_motorista_carro_estatisticas():
+    mid = _motorista_logado()
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    concluidas = [
+        c for c in CORRIDAS_CARRO
+        if c.get("motorista_id") == mid
+        and c.get("status") == "CONCLUIDA"
+    ]
+
+    hoje = datetime.now().date().isoformat()
+
+    corridas_hoje = 0
+    ganhos_hoje = 0.0
+    total = 0.0
+
+    for corrida in concluidas:
+        valor_motorista = float(corrida.get("valor_motorista") or 0)
+        total += valor_motorista
+
+        concluido_em = str(corrida.get("concluido_em") or "")
+        if concluido_em[:10] == hoje:
+            corridas_hoje += 1
+            ganhos_hoje += valor_motorista
+
+    return {
+        "ok": True,
+        "corridas_hoje": corridas_hoje,
+        "ganhos_hoje": round(ganhos_hoje, 2),
+        "total": round(total, 2)
+    }
+
+
+@app.route("/motorista-carro")
+def motorista_carro_tela():
+    mid = _motorista_logado()
+    if not mid:
+        return redirect(url_for("login_motorista"))
+    return send_from_directory("static", "motorista_carro_demo.html")
 
 
 @app.route("/api/motoristas-online")

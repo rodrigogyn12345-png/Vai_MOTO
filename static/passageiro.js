@@ -119,6 +119,13 @@ window.solicitar = async function solicitar(){
   const pagamento =
     document.getElementById("pagamento").value;
 
+  const textoVeiculoSelecionado =
+    document.getElementById("veiculo-demo-selecionado")?.textContent || "";
+
+  const ehCarroDemo =
+    window.veiculoDemoSelecionado === "CARRO" ||
+    textoVeiculoSelecionado.includes("VAI_DE_CARRO");
+
   if(!["DINHEIRO","PIX","CARTAO"].includes(pagamento)){
     msg("Escolha Dinheiro, PIX ou Cartão.","erro");
     return;
@@ -174,7 +181,9 @@ window.solicitar = async function solicitar(){
   try{
 
     const r = await fetch(
-      "/api/solicitar-corrida",
+      ehCarroDemo
+        ? "/api/solicitar-corrida-carro"
+        : "/api/solicitar-corrida",
       {
         method:"POST",
         headers:{
