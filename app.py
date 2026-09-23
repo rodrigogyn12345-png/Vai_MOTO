@@ -10021,6 +10021,48 @@ def admin_saques():
             </form>
             """
 
+        botoes = ""
+        if status == "PENDENTE":
+            botoes = f"""
+            <form method="POST"
+                  action="/saques-carro/status/{s["id"]}/PAGO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#16833b;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Confirmar este saque como PAGO?')">
+                    ✅ MARCAR COMO PAGO
+                </button>
+            </form>
+
+            <form method="POST"
+                  action="/saques-carro/status/{s["id"]}/CANCELADO"
+                  style="margin-top:10px;">
+                <button
+                    style="
+                        width:100%;
+                        padding:15px;
+                        border:0;
+                        border-radius:12px;
+                        background:#b00000;
+                        color:#fff;
+                        font-size:18px;
+                        font-weight:900;
+                    "
+                    onclick="return confirm('Cancelar este saque?')">
+                    ❌ CANCELAR SAQUE
+                </button>
+            </form>
+            """
+
         cards += f"""
         <div style="
             background:#fff;
@@ -10101,6 +10143,164 @@ def admin_saques():
 
     return html_page
 
+
+
+@app.route("/saques-carro")
+@login_obrigatorio
+def admin_saques_carro():
+    garantir_tabela_saques_carro()
+
+    conn = conectar()
+    rows = conn.execute("""
+        SELECT
+            s.*,
+            m.nome AS motorista_nome,
+            m.telefone AS motorista_telefone
+        FROM saques_carro s
+        LEFT JOIN motoristas_carro m
+            ON m.id=s.motorista_carro_id
+        ORDER BY
+            CASE WHEN s.status='PENDENTE' THEN 0 ELSE 1 END,
+            s.id DESC
+        LIMIT 100
+    """).fetchall()
+    conn.close()
+
+    import html
+
+    cards = ""
+
+    for s in rows:
+        status = str(s["status"] or "")
+
+        if status == "PAGO":
+            cor = "#16833b"
+        elif status == "CANCELADO":
+            cor = "#b00000"
+        else:
+            cor = "#d99a00"
+
+        valor = float(s["valor"] or 0)
+        taxa = float(s["taxa_antecipacao"] or 0)
+        liquido = float(s["valor_liquido"] or (valor - taxa))
+
+        cards += f"""
+        <div style="
+            background:#fff;
+            color:#111;
+            border-radius:16px;
+            padding:18px;
+            margin:15px 0;
+            border-left:8px solid {cor};
+        ">
+            <h3>🚗 SAQUE CARRO #{s["id"]}</h3>
+
+            <b>🚗 Motorista:</b>
+            {html.escape(str(s["motorista_nome"] or ""))}<br>
+
+            <b>📞 Telefone:</b>
+            {html.escape(str(s["motorista_telefone"] or ""))}<br>
+
+            <b>💵 Valor solicitado:</b>
+            R$ {valor:.2f}<br>
+
+            <b>📉 Taxa de antecipação (5%):</b>
+            R$ {taxa:.2f}<br>
+
+            <b>💰 Valor líquido:</b>
+            R$ {liquido:.2f}<br>
+
+            <b>🔑 PIX:</b>
+            {html.escape(str(s["pix_chave"] or ""))}<br>
+
+            <b>Tipo:</b>
+            {html.escape(str(s["pix_tipo"] or ""))}<br>
+
+            <b>📌 Status:</b>
+            <strong>{html.escape(status)}</strong><br>
+
+            <small>{html.escape(str(s["criado_em"] or ""))}</small>
+
+            {botoes}
+        </div>
+        """
+
+    if not cards:
+        cards = "<p>Nenhuma solicitação de saque de carro.</p>"
+
+    html_page = f"""
+    <!doctype html>
+    <html lang="pt-BR">
+    <head>
+        <meta name="viewport"
+              content="width=device-width,initial-scale=1">
+        <title>Saques VAI_DE_CARRO</title>
+        <meta http-equiv="refresh" content="10">
+    </head>
+
+    <body style="
+        margin:0;
+        padding:20px;
+        background:#111;
+        color:#fff;
+        font-family:Arial,sans-serif;
+    ">
+
+        <h1>🚗💰 Saques VAI_DE_CARRO</h1>
+
+        {cards}
+
+        <a href="/"
+           style="
+             display:block;
+             background:#1769aa;
+             color:#fff;
+             padding:16px;
+             border-radius:12px;
+             text-align:center;
+             text-decoration:none;
+             font-weight:900;
+           ">
+           🏠 VOLTAR
+        </a>
+
+    </body>
+    </html>
+    """
+
+    return html_page
+
+
+@app.route("/saques-carro/status/<int:id>/<status>", methods=["POST"])
+@login_obrigatorio
+def admin_saque_carro_status(id, status):
+    status = status.upper()
+
+    if status not in ("PAGO", "CANCELADO"):
+        return "Status inválido.", 400
+
+    garantir_tabela_saques_carro()
+
+    conn = conectar()
+
+    if status == "PAGO":
+        conn.execute("""
+            UPDATE saques_carro
+            SET status='PAGO',
+                pago_em=CURRENT_TIMESTAMP
+            WHERE id=? AND status='PENDENTE'
+        """, (id,))
+    else:
+        conn.execute("""
+            UPDATE saques_carro
+            SET status='CANCELADO'
+            WHERE id=? AND status='PENDENTE'
+        """, (id,))
+
+    conn.commit()
+    conn.close()
+
+    return redirect(url_for("admin_saques_carro"))
 
 @app.route("/saques/status/<int:id>/<status>", methods=["POST"])
 @login_obrigatorio
