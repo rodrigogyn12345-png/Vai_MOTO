@@ -487,6 +487,56 @@ def iniciar_banco():
     """)
 
 
+    # ================================
+    # TABELA DE MOTORISTAS DE CARRO
+    # ================================
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS motoristas_carro (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT NOT NULL,
+            telefone TEXT NOT NULL UNIQUE,
+            cpf TEXT NOT NULL,
+            cnh TEXT NOT NULL,
+            marca TEXT NOT NULL,
+            modelo TEXT NOT NULL,
+            placa TEXT NOT NULL,
+            ano TEXT DEFAULT '',
+            localizacao TEXT DEFAULT '',
+            observacao TEXT DEFAULT '',
+            senha TEXT DEFAULT '',
+            status TEXT DEFAULT 'pendente',
+            conexao TEXT DEFAULT 'offline',
+            latitude REAL,
+            longitude REAL,
+            foto_motorista TEXT DEFAULT '',
+            cnh_frente TEXT DEFAULT '',
+            cnh_verso TEXT DEFAULT '',
+            crlv TEXT DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Migração segura dos documentos dos motoristas de carro
+    colunas_carro = {
+        "foto_motorista": "TEXT DEFAULT ''",
+        "cnh_frente": "TEXT DEFAULT ''",
+        "cnh_verso": "TEXT DEFAULT ''",
+        "crlv": "TEXT DEFAULT ''"
+    }
+
+    existentes_carro = {
+        row["name"]
+        for row in conn.execute(
+            "PRAGMA table_info(motoristas_carro)"
+        ).fetchall()
+    }
+
+    for coluna, tipo in colunas_carro.items():
+        if coluna not in existentes_carro:
+            conn.execute(
+                f"ALTER TABLE motoristas_carro ADD COLUMN {coluna} {tipo}"
+            )
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS passageiros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1381,6 +1431,14 @@ def dashboard():
     </div>
 
     <div class="card">
+        <h2>🚗 Gerenciar motoristas VAI_DE_CARRO</h2>
+        <p>Cadastre, analise e aprove os motoristas de carro separadamente dos motoqueiros.</p>
+        <a class="btn btn-azul" href="{url_for('motoristas_carro_admin')}">
+            ABRIR MOTORISTAS DE CARRO
+        </a>
+    </div>
+
+    <div class="card">
         <h2>👥 Gerenciar passageiros</h2>
         <p>Cadastre e gerencie os passageiros.</p>
         <a class="btn btn-azul" href="{url_for('passageiros')}">
@@ -1949,6 +2007,106 @@ def excluir_passageiro(id):
     flash("Passageiro excluído.", "sucesso")
 
     return redirect(url_for("passageiros"))
+
+
+
+@app.route("/admin/motoristas-carro")
+@login_obrigatorio
+def motoristas_carro_admin():
+    conn = conectar()
+    lista = conn.execute(
+        "SELECT * FROM motoristas_carro ORDER BY id DESC"
+    ).fetchall()
+    conn.close()
+
+    linhas = ""
+    for m in lista:
+        status = m["status"]
+        status_texto = {
+            "aprovado": "APROVADO",
+            "reprovado": "REPROVADO",
+            "pendente": "PENDENTE"
+        }.get(status, status.upper())
+
+        linhas += f"""
+        <tr>
+            <td>{m["id"]}</td>
+            <td><b>{m["nome"]}</b></td>
+            <td>{m["telefone"]}</td>
+            <td>{m["cpf"]}</td>
+            <td>{m["marca"]} {m["modelo"]}<br><b>{m["placa"]}</b></td>
+            <td>{m["status"]}</td>
+            <td>{m["conexao"]}</td>
+            <td>
+                <a class="btn btn-verde"
+                   href="{url_for('alterar_status_motorista_carro', id=m['id'], status='aprovado')}">
+                   Aprovar
+                </a>
+                <a class="btn btn-vermelho"
+                   href="{url_for('alterar_status_motorista_carro', id=m['id'], status='reprovado')}">
+                   Reprovar
+                </a>
+            </td>
+        </tr>
+        """
+
+    if not linhas:
+        linhas = """
+        <tr>
+            <td colspan="8" style="text-align:center">
+                Nenhum motorista de carro cadastrado.
+            </td>
+        </tr>
+        """
+
+    html = f"""
+    <h1>🚗 Motoristas VAI_DE_CARRO</h1>
+    <div class="card">
+        <p>
+            Esta área é exclusiva dos motoristas de carro.
+            Ela não altera os motoristas de moto.
+        </p>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nome</th>
+                    <th>Telefone</th>
+                    <th>CPF</th>
+                    <th>Veículo</th>
+                    <th>Status</th>
+                    <th>Conexão</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {linhas}
+            </tbody>
+        </table>
+    </div>
+    """
+
+    return pagina(html)
+
+
+@app.route("/motoristas-carro/status/<int:id>/<status>")
+@login_obrigatorio
+def alterar_status_motorista_carro(id, status):
+    if status not in ("aprovado", "reprovado", "pendente"):
+        flash("Status inválido.", "erro")
+        return redirect(url_for("motoristas_carro_admin"))
+
+    conn = conectar()
+    conn.execute(
+        "UPDATE motoristas_carro SET status=? WHERE id=?",
+        (status, id)
+    )
+    conn.commit()
+    conn.close()
+
+    flash("Status do motorista de carro atualizado.", "sucesso")
+    return redirect(url_for("motoristas_carro_admin"))
 
 
 
@@ -3666,6 +3824,280 @@ pelo administrador antes da aprovação.
 """
 
 
+MOTORISTA_CARRO_CADASTRO_FORM = """
+<h2>🚗 Cadastro de motorista</h2>
+
+<p>
+    Cadastre-se para dirigir no <b>VAI_DE_CARRO</b>.
+    Após o cadastro, o administrador irá conferir seus dados e documentos
+    antes de liberar o acesso para trabalhar.
+</p>
+
+<form method="post" enctype="multipart/form-data">
+
+<label class="pub-label">Nome completo *</label>
+<input class="pub-input" name="nome" required placeholder="Nome completo">
+
+<label class="pub-label">Telefone *</label>
+<input class="pub-input" name="telefone" required placeholder="(62) 99999-9999">
+
+<label class="pub-label">CPF *</label>
+<input class="pub-input" name="cpf" required placeholder="000.000.000-00">
+
+<label class="pub-label">CNH *</label>
+<input class="pub-input" name="cnh" required placeholder="Número da CNH">
+
+<label class="pub-label">Marca do carro *</label>
+<input class="pub-input" name="marca" required placeholder="Chevrolet">
+
+<label class="pub-label">Modelo do carro *</label>
+<input class="pub-input" name="modelo" required placeholder="Onix">
+
+<label class="pub-label">Placa *</label>
+<input class="pub-input" name="placa" required placeholder="ABC1D23">
+
+<label class="pub-label">Ano *</label>
+<input class="pub-input" name="ano" required placeholder="2024">
+
+<label class="pub-label">Localização *</label>
+<input class="pub-input" name="localizacao" required placeholder="Cidade / bairro">
+
+<hr>
+
+<h3>🔐 Documentos para aprovação</h3>
+
+<p>
+    Envie fotos ou PDFs nítidos dos documentos.
+    Eles serão analisados pelo administrador antes da aprovação.
+</p>
+
+<label class="pub-label">📷 Foto do motorista *</label>
+<input class="pub-input"
+       type="file"
+       name="foto_motorista"
+       accept="image/jpeg,image/png,image/webp"
+       required>
+
+<label class="pub-label">🪪 CNH - frente *</label>
+<input class="pub-input"
+       type="file"
+       name="cnh_frente"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<label class="pub-label">🪪 CNH - verso *</label>
+<input class="pub-input"
+       type="file"
+       name="cnh_verso"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<label class="pub-label">🚗 CRLV *</label>
+<input class="pub-input"
+       type="file"
+       name="crlv"
+       accept="image/jpeg,image/png,image/webp,application/pdf"
+       required>
+
+<hr>
+
+<label class="pub-label">Senha *</label>
+<input class="pub-input"
+       name="senha"
+       type="password"
+       minlength="6"
+       required
+       placeholder="Mínimo 6 caracteres">
+
+<button class="pub-btn pub-blue" type="submit">
+    🚗 ENVIAR CADASTRO
+</button>
+
+</form>
+"""
+
+@app.route("/cadastro/motorista-carro", methods=["GET", "POST"])
+def cadastro_motorista_carro():
+    if request.method == "POST":
+        nome = request.form.get("nome", "").strip()
+        telefone = request.form.get("telefone", "").strip()
+        cpf = request.form.get("cpf", "").strip()
+        cnh = request.form.get("cnh", "").strip()
+        marca = request.form.get("marca", "").strip()
+        modelo = request.form.get("modelo", "").strip()
+        placa = request.form.get("placa", "").strip().upper()
+        ano = request.form.get("ano", "").strip()
+        localizacao = request.form.get("localizacao", "").strip()
+        senha = request.form.get("senha", "")
+
+        foto_motorista = request.files.get("foto_motorista")
+        cnh_frente = request.files.get("cnh_frente")
+        cnh_verso = request.files.get("cnh_verso")
+        crlv = request.files.get("crlv")
+
+        if not all([
+            nome, telefone, cpf, cnh, marca, modelo,
+            placa, ano, localizacao, senha
+        ]):
+            return _pagina_publica(
+                "Cadastro VAI_DE_CARRO",
+                '<div class="alert erro">Preencha todos os campos.</div>'
+                + MOTORISTA_CARRO_CADASTRO_FORM
+            )
+
+        if len(senha) < 6:
+            return _pagina_publica(
+                "Cadastro VAI_DE_CARRO",
+                '<div class="alert erro">A senha deve ter pelo menos 6 caracteres.</div>'
+                + MOTORISTA_CARRO_CADASTRO_FORM
+            )
+
+        arquivos = {
+            "foto_motorista": foto_motorista,
+            "cnh_frente": cnh_frente,
+            "cnh_verso": cnh_verso,
+            "crlv": crlv
+        }
+
+        if not all(arquivos.values()):
+            return _pagina_publica(
+                "Cadastro VAI_DE_CARRO",
+                '<div class="alert erro">Envie todos os documentos obrigatórios.</div>'
+                + MOTORISTA_CARRO_CADASTRO_FORM
+            )
+
+        extensoes_permitidas = {
+            ".jpg", ".jpeg", ".png", ".webp", ".pdf"
+        }
+
+        for nome_campo, arquivo in arquivos.items():
+            if not arquivo.filename:
+                return _pagina_publica(
+                    "Cadastro VAI_DE_CARRO",
+                    '<div class="alert erro">Arquivo inválido.</div>'
+                    + MOTORISTA_CARRO_CADASTRO_FORM
+                )
+
+            extensao = os.path.splitext(
+                arquivo.filename.lower()
+            )[1]
+
+            if extensao not in extensoes_permitidas:
+                return _pagina_publica(
+                    "Cadastro VAI_DE_CARRO",
+                    '<div class="alert erro">'
+                    'Formato de arquivo não permitido. '
+                    'Use JPG, PNG, WEBP ou PDF.'
+                    '</div>'
+                    + MOTORISTA_CARRO_CADASTRO_FORM
+                )
+
+        conn = conectar()
+
+        try:
+            existente = conn.execute(
+                "SELECT id FROM motoristas_carro WHERE telefone=?",
+                (telefone,)
+            ).fetchone()
+
+            if existente:
+                return _pagina_publica(
+                    "Cadastro VAI_DE_CARRO",
+                    '<div class="alert erro">Telefone já cadastrado para motorista de carro.</div>'
+                    + MOTORISTA_CARRO_CADASTRO_FORM
+                )
+
+            cur = conn.execute("""
+                INSERT INTO motoristas_carro
+                (
+                    nome, telefone, cpf, cnh,
+                    marca, modelo, placa, ano,
+                    localizacao, observacao,
+                    senha, status, conexao
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, 'pendente', 'offline')
+            """, (
+                nome,
+                telefone,
+                cpf,
+                cnh,
+                marca,
+                modelo,
+                placa,
+                ano,
+                localizacao,
+                generate_password_hash(senha)
+            ))
+
+            motorista_id = cur.lastrowid
+
+            pasta = Path("documentos_motoristas_carro") / str(motorista_id)
+            pasta.mkdir(parents=True, exist_ok=True)
+
+            caminhos = {}
+
+            for nome_campo, arquivo in arquivos.items():
+                extensao = os.path.splitext(
+                    arquivo.filename.lower()
+                )[1]
+
+                nome_arquivo = (
+                    nome_campo
+                    + "_"
+                    + uuid.uuid4().hex
+                    + extensao
+                )
+
+                caminho = pasta / nome_arquivo
+                arquivo.save(str(caminho))
+                caminhos[nome_campo] = str(caminho)
+
+            conn.execute("""
+                UPDATE motoristas_carro
+                SET
+                    foto_motorista=?,
+                    cnh_frente=?,
+                    cnh_verso=?,
+                    crlv=?
+                WHERE id=?
+            """, (
+                caminhos["foto_motorista"],
+                caminhos["cnh_frente"],
+                caminhos["cnh_verso"],
+                caminhos["crlv"],
+                motorista_id
+            ))
+
+            conn.commit()
+
+        except Exception:
+            conn.rollback()
+            raise
+        finally:
+            conn.close()
+
+        return _pagina_publica(
+            "Cadastro enviado",
+            """
+            <div class="alert sucesso">
+            ✅ Cadastro de motorista de carro enviado com sucesso.<br><br>
+            📄 Seus documentos foram enviados para análise.<br>
+            👨‍💼 Aguarde a aprovação do administrador.
+            </div>
+
+            <a class="pub-btn pub-blue"
+               href="/login-motorista-carro">
+                🚗 ENTRAR COMO MOTORISTA DE CARRO
+            </a>
+            """
+        )
+
+    return _pagina_publica(
+        "Cadastro VAI_DE_CARRO",
+        MOTORISTA_CARRO_CADASTRO_FORM
+    )
+
+
 @app.route("/cadastro/motorista", methods=["GET", "POST"])
 def cadastro_motorista():
 
@@ -3913,6 +4345,116 @@ PASSAGEIRO_LOGIN_FORM = """
 <button class="pub-btn pub-green" type="submit">ENTRAR</button>
 </form>
 <a class="pub-btn" href="/cadastro/passageiro">CRIAR CONTA</a>
+"""
+
+
+def _motorista_carro_logado():
+    """Retorna o motorista de carro autenticado, ou None."""
+    mid = session.get("motorista_carro_id")
+
+    if not mid:
+        return None
+
+    conn = conectar()
+    m = conn.execute(
+        """
+        SELECT *
+        FROM motoristas_carro
+        WHERE id=?
+        """,
+        (mid,)
+    ).fetchone()
+    conn.close()
+
+    if not m:
+        session.pop("motorista_carro_id", None)
+        session.pop("motorista_carro_nome", None)
+        return None
+
+    return m
+
+
+@app.route("/login-motorista-carro", methods=["GET", "POST"])
+def login_motorista_carro():
+    if request.method == "POST":
+        telefone = request.form.get("telefone", "").strip()
+        senha = request.form.get("senha", "")
+
+        conn = conectar()
+        m = conn.execute(
+            "SELECT * FROM motoristas_carro WHERE telefone=?",
+            (telefone,)
+        ).fetchone()
+        conn.close()
+
+        if m and m["senha"] and check_password_hash(m["senha"], senha):
+            if m["status"] != "aprovado":
+                return _pagina_publica(
+                    "Login VAI_DE_CARRO",
+                    '<div class="alert">Seu cadastro ainda não foi aprovado pelo administrador.</div>'
+                    + MOTORISTA_CARRO_LOGIN_FORM
+                )
+
+            session.clear()
+            session["motorista_carro_id"] = m["id"]
+            session["motorista_carro_nome"] = m["nome"]
+
+            return redirect(url_for("motorista_carro_tela"))
+
+        return _pagina_publica(
+            "Login VAI_DE_CARRO",
+            '<div class="alert erro">Telefone ou senha inválidos.</div>'
+            + MOTORISTA_CARRO_LOGIN_FORM
+        )
+
+    return _pagina_publica(
+        "Login VAI_DE_CARRO",
+        MOTORISTA_CARRO_LOGIN_FORM
+    )
+
+
+MOTORISTA_CARRO_LOGIN_FORM = """
+<div class="motorista-login">
+  <div class="motorista-login-header">
+    <div class="motorista-logo">🚗</div>
+    <div>
+      <div class="motorista-brand">VAI_DE_<span>CARRO</span></div>
+      <div class="motorista-sub">Transporte de carro rápido e local</div>
+    </div>
+  </div>
+
+  <div class="motorista-title">
+    🚗 Entrar como <span>motorista</span>
+  </div>
+
+  <div class="motorista-desc">
+    Acesse sua conta e comece a rodar com a gente!
+  </div>
+
+  <form method="post">
+    <label class="pub-label">Telefone</label>
+    <input class="pub-input motorista-input"
+           name="telefone"
+           placeholder="Digite seu telefone"
+           required>
+
+    <label class="pub-label">Senha</label>
+    <input class="pub-input motorista-input"
+           name="senha"
+           type="password"
+           placeholder="Digite sua senha"
+           required>
+
+    <button class="pub-btn motorista-entrar" type="submit">
+      ENTRAR ➜
+    </button>
+  </form>
+
+  <a class="pub-btn motorista-cadastro"
+     href="/cadastro/motorista-carro">
+     🚗 CRIAR CONTA DE MOTORISTA DE CARRO
+  </a>
+</div>
 """
 
 
@@ -8165,13 +8707,14 @@ def api_solicitar_corrida_carro():
 
 @app.route("/api/motorista-carro/corridas-pendentes")
 def api_motorista_carro_corridas_pendentes():
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Faça login como motorista."}, 401
 
     conn = conectar()
     m = conn.execute(
-        "SELECT status, conexao FROM motoqueiros WHERE id=?",
+        "SELECT status, conexao FROM motoristas_carro WHERE id=?",
         (mid,)
     ).fetchone()
     conn.close()
@@ -8200,13 +8743,14 @@ def api_motorista_carro_corridas_pendentes():
 
 @app.route("/api/motorista-carro/aceitar/<int:id>", methods=["POST"])
 def api_motorista_carro_aceitar(id):
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
     conn = conectar()
     m = conn.execute(
-        "SELECT status, conexao FROM motoqueiros WHERE id=?",
+        "SELECT status, conexao FROM motoristas_carro WHERE id=?",
         (mid,)
     ).fetchone()
     conn.close()
@@ -8245,7 +8789,8 @@ def api_motorista_carro_aceitar(id):
 
 @app.route("/api/motorista-carro/cheguei/<int:id>", methods=["POST"])
 def api_motorista_carro_cheguei(id):
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
@@ -8279,7 +8824,8 @@ def api_motorista_carro_cheguei(id):
 
 @app.route("/api/motorista-carro/iniciar/<int:id>", methods=["POST"])
 def api_motorista_carro_iniciar(id):
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
@@ -8314,7 +8860,8 @@ def api_motorista_carro_iniciar(id):
 
 @app.route("/api/motorista-carro/receber-dinheiro/<int:id>", methods=["POST"])
 def api_motorista_carro_receber_dinheiro(id):
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
@@ -8351,7 +8898,8 @@ def api_motorista_carro_receber_dinheiro(id):
 
 @app.route("/api/motorista-carro/finalizar/<int:id>", methods=["POST"])
 def api_motorista_carro_finalizar(id):
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
@@ -8407,7 +8955,8 @@ def api_motorista_carro_finalizar(id):
 
 @app.route("/api/motorista-carro/estatisticas")
 def api_motorista_carro_estatisticas():
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
         return {"ok": False, "erro": "Não autenticado."}, 401
 
@@ -8442,9 +8991,10 @@ def api_motorista_carro_estatisticas():
 
 @app.route("/motorista-carro")
 def motorista_carro_tela():
-    mid = _motorista_logado()
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro['id'] if motorista_carro else None
     if not mid:
-        return redirect(url_for("login_motorista"))
+        return redirect(url_for("login_motorista_carro"))
     return send_from_directory("static", "motorista_carro_demo.html")
 
 
@@ -8877,6 +9427,125 @@ api_motoqueiro_status = api_motorista_status
 
 
 # ==============================
+
+# =========================================================
+# VAI_DE_CARRO - SISTEMA DE SAQUES
+# =========================================================
+
+def garantir_tabela_saques_carro():
+    conn = conectar()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS saques_carro (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            motorista_carro_id INTEGER NOT NULL,
+            valor REAL NOT NULL DEFAULT 0,
+            pix_chave TEXT NOT NULL DEFAULT '',
+            pix_tipo TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'PENDENTE',
+            observacao TEXT NOT NULL DEFAULT '',
+            criado_em TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            pago_em TIMESTAMP,
+            FOREIGN KEY (motorista_carro_id) REFERENCES motoristas_carro(id)
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+
+@app.route("/api/motorista-carro/saque", methods=["POST"])
+def api_motorista_carro_saque():
+    motorista_carro = _motorista_carro_logado()
+
+    if not motorista_carro:
+        return {"ok": False, "erro": "Faça login como motorista de carro."}, 401
+
+    data = request.get_json(silent=True) or {}
+
+    try:
+        valor = float(data.get("valor") or 0)
+    except (TypeError, ValueError):
+        valor = 0
+
+    if valor <= 0:
+        return {"ok": False, "erro": "Informe um valor válido para o saque."}, 400
+
+    garantir_tabela_saques_carro()
+
+    conn = conectar()
+
+    motorista = conn.execute("""
+        SELECT id, nome, telefone, status
+        FROM motoristas_carro
+        WHERE id=?
+    """, (motorista_carro["id"],)).fetchone()
+
+    if not motorista:
+        conn.close()
+        return {"ok": False, "erro": "Motorista de carro não encontrado."}, 404
+
+    if motorista["status"] != "aprovado":
+        conn.close()
+        return {"ok": False, "erro": "Motorista de carro ainda não aprovado."}, 403
+
+    ganhos = conn.execute("""
+        SELECT COALESCE(SUM(valor_motorista), 0) AS total
+        FROM corridas_vai
+        WHERE 1=0
+    """).fetchone()
+
+    total = float(ganhos["total"] or 0)
+
+    corridas_carro = CORRIDAS_CARRO
+
+    for corrida in corridas_carro:
+        if corrida.get("motorista_id") == motorista_carro["id"]:
+            if corrida.get("status") == "CONCLUIDA":
+                total += float(corrida.get("valor_motorista") or 0)
+
+    pagos = conn.execute("""
+        SELECT COALESCE(SUM(valor), 0) AS total
+        FROM saques_carro
+        WHERE motorista_carro_id=? AND status IN ('PENDENTE','PAGO')
+    """, (motorista_carro["id"],)).fetchone()
+
+    ja_solicitado = float(pagos["total"] or 0)
+
+    disponivel = total - ja_solicitado
+
+    if valor > disponivel + 0.01:
+        conn.close()
+        return {
+            "ok": False,
+            "erro": f"Saldo disponível insuficiente. Disponível: R$ {max(disponivel, 0):.2f}"
+        }, 400
+
+    conn.execute("""
+        INSERT INTO saques_carro
+        (motorista_carro_id, valor, pix_chave, pix_tipo, status)
+        VALUES (?, ?, ?, ?, 'PENDENTE')
+    """, (
+        motorista_carro["id"],
+        round(valor, 2),
+        str(data.get("pix_chave") or ""),
+        str(data.get("pix_tipo") or "")
+    ))
+
+    conn.commit()
+
+    row = conn.execute("""
+        SELECT *
+        FROM saques_carro
+        WHERE id=last_insert_rowid()
+    """).fetchone()
+
+    conn.close()
+
+    return {
+        "ok": True,
+        "saque": dict(row),
+        "saldo_disponivel": round(disponivel - valor, 2)
+    }
+
 
 # =========================================================
 # VAI_DE_MOTO - SISTEMA DE SAQUES

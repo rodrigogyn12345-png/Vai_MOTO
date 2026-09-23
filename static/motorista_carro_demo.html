@@ -1,0 +1,1391 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#050505">
+<title>VAI_DE_CARRO • Motorista</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;font-family:Arial,Helvetica,sans-serif;color:#fff}
+.car-app{position:fixed;inset:0;background:#050505;overflow:hidden}
+
+#map{
+  position:absolute;
+  inset:0;
+  z-index:1;
+  background:#dfe6eb;
+}
+
+.leaflet-control-zoom{display:none!important}
+.leaflet-control-attribution{
+  font-size:9px!important;
+  background:rgba(255,255,255,.7)!important
+}
+
+.topbar{
+  position:absolute;
+  z-index:20;
+  top:0;
+  left:0;
+  right:0;
+  padding:calc(10px + env(safe-area-inset-top)) 14px 12px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  background:linear-gradient(180deg,rgba(0,0,0,.92),rgba(0,0,0,.45),transparent)
+}
+
+.profile{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  min-width:0
+}
+
+.avatar{
+  width:45px;
+  height:45px;
+  border-radius:50%;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  background:#171717;
+  border:1px solid #2563eb;
+  color:#60a5fa;
+  font-size:20px;
+  font-weight:900;
+  box-shadow:0 0 0 3px rgba(0,0,0,.25)
+}
+
+.driver-name{
+  font-weight:900;
+  font-size:16px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  max-width:180px
+}
+
+.driver-role{
+  font-size:11px;
+  color:#aaa;
+  margin-top:2px
+}
+
+.profile-btn{
+  width:43px;
+  height:43px;
+  border-radius:50%;
+  border:1px solid #263b66;
+  background:rgba(10,10,10,.88);
+  color:#60a5fa;
+  font-size:21px;
+  text-decoration:none;
+  display:flex;
+  align-items:center;
+  justify-content:center
+}
+
+.earnings-pill{
+  position:absolute;
+  z-index:21;
+  top:calc(72px + env(safe-area-inset-top));
+  left:50%;
+  transform:translateX(-50%);
+  min-width:185px;
+  padding:13px 18px;
+  border-radius:30px;
+  background:rgba(38,38,38,.95);
+  box-shadow:0 8px 22px rgba(0,0,0,.35);
+  text-align:center
+}
+
+.earnings-pill .money{
+  font-size:20px;
+  font-weight:900
+}
+
+.earnings-pill .today{
+  font-size:11px;
+  color:#aaa;
+  margin-left:4px
+}
+
+.status-pill{
+  position:absolute;
+  z-index:22;
+  top:calc(72px + env(safe-area-inset-top));
+  right:12px;
+  border:0;
+  border-radius:24px;
+  padding:11px 15px;
+  background:#343434;
+  color:#ddd;
+  font-weight:900;
+  box-shadow:0 7px 18px rgba(0,0,0,.3)
+}
+
+.status-dot{
+  display:inline-block;
+  width:8px;
+  height:8px;
+  border-radius:50%;
+  margin-right:6px;
+  background:#aaa
+}
+
+.status-pill.online{
+  background:#17371f;
+  color:#c9ffd5
+}
+
+.status-pill.online .status-dot{
+  background:#32d46b;
+  box-shadow:0 0 8px #32d46b
+}
+
+.online-action{
+  position:absolute;
+  z-index:25;
+  right:15px;
+  top:calc(122px + env(safe-area-inset-top));
+  border:0;
+  border-radius:25px;
+  padding:11px 16px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:900;
+  box-shadow:0 7px 18px rgba(0,0,0,.32)
+}
+
+.map-btn{
+  position:absolute;
+  z-index:25;
+  right:14px;
+  bottom:300px;
+  width:54px;
+  height:54px;
+  border:0;
+  border-radius:50%;
+  background:#252525;
+  color:#fff;
+  font-size:23px;
+  box-shadow:0 8px 20px rgba(0,0,0,.35)
+}
+
+.notify-btn{
+  position:absolute;
+  z-index:25;
+  right:14px;
+  bottom:235px;
+  width:54px;
+  height:54px;
+  border:0;
+  border-radius:50%;
+  background:#454545;
+  color:#60a5fa;
+  font-size:24px;
+  box-shadow:0 8px 20px rgba(0,0,0,.35)
+}
+
+.sheet{
+  position:absolute;
+  z-index:15;
+  left:0;
+  right:0;
+  bottom:62px;
+  min-height:275px;
+  max-height:59vh;
+  background:rgba(5,5,5,.97);
+  border-radius:28px 28px 0 0;
+  box-shadow:0 -12px 30px rgba(0,0,0,.3);
+  padding:13px 15px 20px;
+  overflow:auto
+}
+
+.handle{
+  width:45px;
+  height:5px;
+  border-radius:5px;
+  background:#3b3b3b;
+  margin:0 auto 14px
+}
+
+.sheet-title{
+  font-size:21px;
+  font-weight:900;
+  margin-bottom:7px
+}
+
+.sheet-sub{
+  font-size:13px;
+  color:#858585;
+  margin-bottom:13px
+}
+
+.stat-grid{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  gap:8px;
+  margin:10px 0
+}
+
+.stat{
+  background:#151515;
+  border-radius:15px;
+  padding:13px 7px;
+  text-align:center
+}
+
+.stat b{
+  display:block;
+  font-size:17px
+}
+
+.stat span{
+  font-size:9px;
+  color:#888
+}
+
+.section-title{
+  font-size:18px;
+  font-weight:900;
+  margin-top:16px
+}
+
+.empty{
+  padding:20px 10px;
+  text-align:center;
+  color:#777
+}
+
+.empty strong{
+  display:block;
+  color:#ddd;
+  margin-bottom:5px
+}
+
+.withdraw{
+  width:100%;
+  border:0;
+  border-radius:14px;
+  padding:14px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:900;
+  font-size:15px;
+  margin-top:12px
+}
+
+.bottom-nav{
+  position:absolute;
+  z-index:30;
+  bottom:0;
+  left:0;
+  right:0;
+  height:calc(62px + env(safe-area-inset-bottom));
+  padding-bottom:env(safe-area-inset-bottom);
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  background:#050505;
+  border-top:1px solid #1c1c1c
+}
+
+.nav-item{
+  border:0;
+  background:transparent;
+  color:#666;
+  font-size:10px;
+  font-weight:800;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:4px
+}
+
+.nav-item .ico{
+  font-size:22px;
+  line-height:1
+}
+
+.nav-item.active{
+  color:#60a5fa
+}
+
+.toast{
+  position:absolute;
+  z-index:50;
+  left:50%;
+  top:18%;
+  transform:translateX(-50%);
+  background:#171717;
+  border:1px solid #333;
+  border-radius:14px;
+  padding:12px 16px;
+  display:none;
+  max-width:90%;
+  font-weight:700;
+  box-shadow:0 10px 30px #000
+}
+</style>
+</head>
+
+<body>
+
+<div class="car-app">
+
+  <div id="map"></div>
+
+  <div class="topbar">
+    <div class="profile">
+      <div class="avatar" id="avatar">C</div>
+      <div>
+        <div class="driver-name">Motorista VAI_DE_CARRO</div>
+        <div class="driver-role">🚗 VAI_DE_CARRO</div>
+      </div>
+    </div>
+
+    <a class="profile-btn" href="#" onclick="alert('Perfil do motorista será conectado na próxima etapa.')">♙</a>
+  </div>
+
+  <div class="earnings-pill">
+    <span class="money" id="saldoHojeTopo">R$ 0,00</span>
+    <span class="today">hoje</span>
+  </div>
+
+  <button id="statusPill" class="status-pill">
+    <span class="status-dot"></span>
+    <span id="statusText">Offline</span>
+  </button>
+
+  <button id="onlineAction" class="online-action" onclick="alternarStatus()">
+    FICAR ONLINE
+  </button>
+
+  <button class="map-btn" onclick="centralizar()">⌖</button>
+
+  <button class="notify-btn" onclick="alert('🔔 Notificações serão ativadas na próxima etapa.')">
+    🔔
+  </button>
+
+  <div class="sheet">
+
+    <div class="handle"></div>
+
+    <div class="sheet-title" id="sheetTitle">
+      Você está offline
+    </div>
+
+    <div class="sheet-sub" id="sheetSub">
+      Fique online para receber novos pedidos.
+    </div>
+
+    <div class="stat-grid">
+      <div class="stat">
+        <b>0</b>
+        <span>CORRIDAS HOJE</span>
+      </div>
+
+      <div class="stat">
+        <b>R$ 0,00</b>
+        <span>GANHOS HOJE</span>
+      </div>
+
+      <div class="stat">
+        <b>R$ 0,00</b>
+        <span>TOTAL</span>
+      </div>
+    </div>
+
+    <div class="section-title">🚕 Corridas</div>
+
+    <div id="corridaCarroPendente" style="display:none;margin-top:12px;background:#151515;border-radius:18px;padding:15px;">
+      <div style="font-size:18px;font-weight:900;">🚗 NOVA CORRIDA</div>
+      <div id="corridaCarroDetalhes" style="margin-top:8px;color:#ddd;font-size:14px;line-height:1.5;"></div>
+
+      <div id="contadorCorridaCarro" style="margin-top:10px;text-align:center;font-size:24px;font-weight:1000;color:#facc15;">
+🔔 TOQUE PARA ACEITAR — <span id="segundosCorridaCarro">15</span>s
+</div>
+<button type="button" onclick="aceitarCorridaCarro()"
+        style="width:100%;margin-top:12px;border:0;border-radius:14px;padding:15px;background:#22c55e;color:#071b0c;font-weight:900;font-size:16px;">
+        ✅ ACEITAR CORRIDA
+      </button>
+    </div>
+
+    <div id="navegacaoPassageiroCarro" style="display:none;margin-top:12px;">
+      <div style="font-weight:900;margin-bottom:8px;">📍 Navegação até o passageiro</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <button type="button" onclick="irGoogleMapsPassageiro()"
+          style="border:0;border-radius:14px;padding:14px 8px;background:#2563eb;color:#fff;font-weight:900;">
+          🗺️ GOOGLE MAPS
+        </button>
+        <button type="button" onclick="irWazePassageiro()"
+          style="border:0;border-radius:14px;padding:14px 8px;background:#19a7e0;color:#fff;font-weight:900;">
+          🧭 WAZE
+        </button>
+      </div>
+    </div>
+
+    <div id="acaoChegueiCarro" style="display:none;margin-top:12px;">
+      <button type="button" id="btnChegueiCarro" onclick="chegueiAoPassageiroCarro()"
+        style="width:100%;border:0;border-radius:14px;padding:15px;background:#facc15;color:#111;font-weight:1000;font-size:16px;">
+        📍 CHEGUEI AO PASSAGEIRO
+      </button>
+    </div>
+
+    <div id="acaoIniciarCarro" style="display:none;margin-top:12px;">
+      <button type="button" id="btnIniciarCarro" onclick="iniciarCorridaCarro()"
+        style="width:100%;border:0;border-radius:14px;padding:15px;background:#22c55e;color:#fff;font-weight:1000;font-size:16px;">
+        ▶️ INICIAR CORRIDA
+      </button>
+    </div>
+
+    <div id="acaoPagamentoDinheiroCarro" style="display:none;margin-top:12px;">
+      <button type="button" id="btnReceberDinheiroCarro" onclick="receberDinheiroCarro()"
+        style="width:100%;border:0;border-radius:14px;padding:15px;background:#facc15;color:#111;font-weight:1000;font-size:16px;">
+        💵 RECEBER DO PASSAGEIRO
+      </button>
+    </div>
+
+    <div id="acaoPagamentoOnlineCarro" style="display:none;margin-top:12px;">
+      <div style="padding:15px;border-radius:14px;background:#2563eb;color:#fff;text-align:center;font-weight:1000;font-size:16px;">
+        💳 PAGAMENTO ONLINE
+      </div>
+    </div>
+
+    <div id="acaoFinalizarCarro" style="display:none;margin-top:12px;">
+      <button type="button" id="btnFinalizarCarro" onclick="finalizarCorridaCarro()"
+        style="width:100%;border:0;border-radius:14px;padding:15px;background:#22c55e;color:#fff;font-weight:1000;font-size:16px;">
+        ✅ FINALIZAR CORRIDA
+      </button>
+    </div>
+
+    <div class="empty" id="estadoCorridas">
+      <strong id="estadoCorridasTitulo">Você está offline</strong>
+      <span id="estadoCorridasTexto">Ative o online para receber corridas.</span>
+    </div>
+
+    <button class="withdraw" onclick="abrirSaque()">
+      💸 SOLICITAR SAQUE
+    </button>
+
+    <div id="modalSaque" style="display:none;position:fixed;inset:0;z-index:100;background:rgba(0,0,0,.78);padding:20px;">
+      <div style="max-width:430px;margin:70px auto 0;background:#151515;border:1px solid #292929;border-radius:22px;padding:22px;box-shadow:0 15px 40px #000;">
+        <h2 style="margin-top:0;">💸 Solicitar saque</h2>
+
+        <p style="color:#aaa;font-size:13px;line-height:1.5;">
+          O repasse semanal acontece toda <strong style="color:#fff;">quarta-feira sem taxa de antecipação</strong>.
+          Para solicitar antes do repasse, será descontada uma taxa de <strong style="color:#60a5fa;">5%</strong>.
+        </p>
+
+        <div style="background:#0d0d0d;border-radius:14px;padding:15px;margin:15px 0;">
+          <div style="color:#999;font-size:12px;">SALDO DISPONÍVEL</div>
+          <div style="font-size:28px;font-weight:900;margin-top:5px;">R$ 500,00</div>
+        </div>
+
+        <label style="display:block;color:#aaa;font-size:13px;margin-bottom:6px;">
+          Valor que deseja solicitar
+        </label>
+
+        <input id="valorSaque" type="number" min="1" step="0.01"
+               placeholder="Ex.: 300,00"
+               oninput="calcularSaque()"
+               style="width:100%;box-sizing:border-box;padding:15px;border-radius:13px;border:1px solid #333;background:#0d0d0d;color:#fff;font-size:18px;">
+
+        <div style="margin-top:15px;background:#0d0d0d;border-radius:14px;padding:15px;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <span style="color:#999;">Valor solicitado</span>
+            <strong id="resumoSolicitado">R$ 0,00</strong>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;margin-bottom:8px;">
+            <span style="color:#999;">Taxa antecipação (5%)</span>
+            <strong id="resumoTaxa">R$ 0,00</strong>
+          </div>
+
+          <div style="border-top:1px solid #292929;padding-top:10px;display:flex;justify-content:space-between;">
+            <span style="font-weight:900;">Você recebe</span>
+            <strong id="resumoLiquido" style="color:#60a5fa;font-size:20px;">R$ 0,00</strong>
+          </div>
+        </div>
+
+        <button class="withdraw" onclick="confirmarSaque()">
+          ✅ CONFIRMAR SOLICITAÇÃO
+        </button>
+
+        <button onclick="fecharSaque()"
+                style="width:100%;border:0;border-radius:14px;padding:14px;margin-top:9px;background:#292929;color:#fff;font-weight:900;">
+          CANCELAR
+        </button>
+      </div>
+    </div>
+
+  </div>
+
+  <nav class="bottom-nav">
+
+    <button class="nav-item active">
+      <span class="ico">🚗</span>
+      CORRIDAS
+    </button>
+
+    <button class="nav-item">
+      <span class="ico">⌂</span>
+      INÍCIO
+    </button>
+
+    <button class="nav-item">
+      <span class="ico">🛍️</span>
+      PEDIDOS
+    </button>
+
+    <button class="nav-item">
+      <span class="ico">▤</span>
+      HISTÓRICO
+    </button>
+
+    <button class="nav-item">
+      <span class="ico">💰</span>
+      GANHOS
+    </button>
+
+  </nav>
+
+  <div id="toast" class="toast"></div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+let mapa = null;
+let marcadorMotorista = null;
+let destinoPassageiroCarro = {lat:null, lon:null};
+
+
+async function chegueiAoPassageiroCarro(){
+  if(!corridaCarroAtual || !corridaCarroAtual.id){
+    alert("Nenhuma corrida ativa.");
+    return;
+  }
+
+  try{
+    const resposta = await fetch(
+      "/api/motorista-carro/cheguei/" +
+      encodeURIComponent(corridaCarroAtual.id),
+      {
+        method:"POST",
+        credentials:"same-origin"
+      }
+    );
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      alert(dados.erro || "Não foi possível registrar a chegada.");
+      return;
+    }
+
+    corridaCarroAtual = dados.corrida || corridaCarroAtual;
+
+    const botao = document.getElementById("btnChegueiCarro");
+    if(botao){
+      botao.textContent = "✅ CHEGUEI AO PASSAGEIRO";
+      botao.style.background = "#22c55e";
+    }
+
+    const acaoCheguei = document.getElementById("acaoChegueiCarro");
+    if(acaoCheguei){
+      acaoCheguei.style.display = "none";
+    }
+
+    const acaoIniciar = document.getElementById("acaoIniciarCarro");
+    if(acaoIniciar){
+      acaoIniciar.style.display = "block";
+    }
+
+    alert("✅ Chegada registrada! Agora toque em INICIAR CORRIDA.");
+
+  }catch(erro){
+    console.log("Erro ao registrar chegada:", erro);
+    alert("Erro de conexão ao registrar a chegada.");
+  }
+}
+
+async function aceitarCorridaCarro(){
+  if(!corridaCarroAtual || !corridaCarroAtual.id){
+    alert("Nenhuma corrida disponível para aceitar.");
+    return;
+  }
+
+  try{
+    const resposta = await fetch(
+      "/api/motorista-carro/aceitar/" + encodeURIComponent(corridaCarroAtual.id),
+      {
+        method:"POST",
+        credentials:"same-origin"
+      }
+    );
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      alert(dados.erro || "Não foi possível aceitar a corrida.");
+      return;
+    }
+
+    corridaCarroAtual = dados.corrida || corridaCarroAtual;
+
+    if(timerContagemCarro){
+      clearInterval(timerContagemCarro);
+      timerContagemCarro = null;
+    }
+    corridaCarroChamandoId = null;
+
+    const contadorAceita = document.getElementById("contadorCorridaCarro");
+    if(contadorAceita){
+      contadorAceita.innerHTML = "✅ CORRIDA ACEITA";
+      contadorAceita.style.color = "#22c55e";
+    }
+
+    const acaoCheguei = document.getElementById("acaoChegueiCarro");
+    if(acaoCheguei){
+      acaoCheguei.style.display = "block";
+    }
+
+    definirDestinoPassageiroCarro(
+      corridaCarroAtual.origem_lat,
+      corridaCarroAtual.origem_lon
+    );
+
+    const card = document.getElementById("corridaCarroPendente");
+    if(card) card.style.display = "none";
+
+    alert("✅ Corrida aceita! Use Google Maps ou Waze para ir até o passageiro.");
+
+  }catch(erro){
+    console.log("Erro ao aceitar corrida de carro:", erro);
+    alert("Erro de conexão ao aceitar a corrida.");
+  }
+}
+
+async function iniciarCorridaCarro(){
+  if(!corridaCarroAtual || !corridaCarroAtual.id){
+    alert("Nenhuma corrida ativa.");
+    return;
+  }
+
+  try{
+    const resposta = await fetch(
+      "/api/motorista-carro/iniciar/" + encodeURIComponent(corridaCarroAtual.id),
+      {
+        method:"POST",
+        credentials:"same-origin"
+      }
+    );
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      alert(dados.erro || "Não foi possível iniciar a corrida.");
+      return;
+    }
+
+    corridaCarroAtual = dados.corrida || corridaCarroAtual;
+
+    atualizarPagamentoCarro();
+
+    const acaoIniciar = document.getElementById("acaoIniciarCarro");
+    if(acaoIniciar){
+      acaoIniciar.style.display = "none";
+    }
+
+    const acaoCheguei = document.getElementById("acaoChegueiCarro");
+    if(acaoCheguei){
+      acaoCheguei.style.display = "none";
+    }
+
+    definirDestinoPassageiroCarro(
+      corridaCarroAtual.dest_lat,
+      corridaCarroAtual.dest_lon
+    );
+
+    const box = document.getElementById("navegacaoPassageiroCarro");
+    const titulo = box ? box.querySelector("div") : null;
+    if(titulo){
+      titulo.textContent = "🏁 Navegação até o destino";
+    }
+
+    alert("▶️ Corrida iniciada! Agora siga até o destino.");
+  }catch(erro){
+    console.log("Erro ao iniciar corrida de carro:", erro);
+    alert("Erro de conexão ao iniciar a corrida.");
+  }
+}
+
+function atualizarPagamentoCarro(){
+  const dinheiro = document.getElementById("acaoPagamentoDinheiroCarro");
+  const online = document.getElementById("acaoPagamentoOnlineCarro");
+
+  if(dinheiro) dinheiro.style.display = "none";
+  if(online) online.style.display = "none";
+
+  if(!corridaCarroAtual) return;
+
+  const pagamento = String(corridaCarroAtual.pagamento || "").toUpperCase();
+
+  if(pagamento === "DINHEIRO"){
+    if(dinheiro) dinheiro.style.display = "block";
+  }else if(pagamento === "PIX" || pagamento === "CARTAO"){
+    if(online) online.style.display = "block";
+  }
+}
+
+async function receberDinheiroCarro(){
+  if(!corridaCarroAtual || !corridaCarroAtual.id){
+    alert("Nenhuma corrida ativa.");
+    return;
+  }
+
+  const valor = Number(corridaCarroAtual.valor || 0).toFixed(2).replace(".", ",");
+
+  if(!confirm("Confirmar que recebeu R$ " + valor + " do passageiro?")){
+    return;
+  }
+
+  const botao = document.getElementById("btnReceberDinheiroCarro");
+
+  if(botao){
+    botao.disabled = true;
+    botao.textContent = "⏳ CONFIRMANDO...";
+  }
+
+  try{
+    const resposta = await fetch(
+      "/api/motorista-carro/receber-dinheiro/" + encodeURIComponent(corridaCarroAtual.id),
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    const dados = await resposta.json().catch(() => ({}));
+
+    if(!resposta.ok || !dados.ok){
+      throw new Error(dados.erro || "Não foi possível confirmar o recebimento.");
+    }
+
+    corridaCarroAtual = dados.corrida || corridaCarroAtual;
+    corridaCarroAtual.pagamento_status = "RECEBIDO";
+
+    if(botao){
+      botao.textContent = "✅ RECEBIMENTO CONFIRMADO";
+      botao.style.background = "#22c55e";
+    }
+
+    const finalizar = document.getElementById("acaoFinalizarCarro");
+    if(finalizar){
+      finalizar.style.display = "block";
+    }
+
+    try{
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if(AudioCtx){
+        const audioCtx = new AudioCtx();
+        const agora = audioCtx.currentTime;
+
+        const tocarNota = (frequencia, inicio, duracao) => {
+          const osc = audioCtx.createOscillator();
+          const ganho = audioCtx.createGain();
+
+          osc.type = "sine";
+          osc.frequency.setValueAtTime(frequencia, agora + inicio);
+
+          ganho.gain.setValueAtTime(0.0001, agora + inicio);
+          ganho.gain.exponentialRampToValueAtTime(0.35, agora + inicio + 0.02);
+          ganho.gain.exponentialRampToValueAtTime(0.0001, agora + inicio + duracao);
+
+          osc.connect(ganho);
+          ganho.connect(audioCtx.destination);
+
+          osc.start(agora + inicio);
+          osc.stop(agora + inicio + duracao + 0.03);
+        };
+
+        tocarNota(880, 0.00, 0.16);
+        tocarNota(1174.66, 0.12, 0.22);
+
+        setTimeout(() => {
+          audioCtx.close().catch(() => {});
+        }, 600);
+      }
+    }catch(erroSom){
+      console.warn("Som de recebimento não pôde ser reproduzido:", erroSom);
+    }
+
+    alert("💵 Recebimento confirmado e salvo. Agora a corrida pode ser finalizada.");
+
+  }catch(erro){
+    if(botao){
+      botao.disabled = false;
+      botao.textContent = "💵 RECEBER DO PASSAGEIRO";
+    }
+
+    alert("❌ " + (erro.message || "Erro ao confirmar recebimento."));
+  }
+}
+
+async function finalizarCorridaCarro(){
+  if(!corridaCarroAtual || !corridaCarroAtual.id){
+    alert("Nenhuma corrida ativa.");
+    return;
+  }
+
+  const pagamento = String(corridaCarroAtual.pagamento || "").toUpperCase();
+
+  if(pagamento === "DINHEIRO" && corridaCarroAtual.pagamento_status !== "RECEBIDO"){
+    alert("💵 Confirme o recebimento do dinheiro antes de finalizar.");
+    return;
+  }
+
+  if((pagamento === "PIX" || pagamento === "CARTAO") &&
+     !["PAGO","CONFIRMADO"].includes(
+       String(corridaCarroAtual.pagamento_status || "").toUpperCase()
+     )){
+    alert("💳 O pagamento online ainda não foi confirmado.");
+    return;
+  }
+
+  try{
+    const resposta = await fetch(
+      "/api/motorista-carro/finalizar/" + encodeURIComponent(corridaCarroAtual.id),
+      {
+        method:"POST",
+        credentials:"same-origin"
+      }
+    );
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      alert(dados.erro || "Não foi possível finalizar a corrida.");
+      return;
+    }
+
+    corridaCarroAtual = dados.corrida || corridaCarroAtual;
+
+    const acaoFinalizar = document.getElementById("acaoFinalizarCarro");
+    if(acaoFinalizar){
+      acaoFinalizar.style.display = "none";
+    }
+
+    const navegacao = document.getElementById("navegacaoPassageiroCarro");
+    if(navegacao){
+      navegacao.style.display = "none";
+    }
+
+    const dinheiro = document.getElementById("acaoPagamentoDinheiroCarro");
+    if(dinheiro){
+      dinheiro.style.display = "none";
+    }
+
+    const online = document.getElementById("acaoPagamentoOnlineCarro");
+    if(online){
+      online.style.display = "none";
+    }
+
+    alert("✅ Corrida finalizada com sucesso!");
+    corridaCarroAtual = null;
+
+  }catch(erro){
+    console.log("Erro ao finalizar corrida de carro:", erro);
+    alert("Erro de conexão ao finalizar a corrida.");
+  }
+}
+
+function definirDestinoPassageiroCarro(lat, lon){
+  lat = Number(lat);
+  lon = Number(lon);
+  if(!Number.isFinite(lat) || !Number.isFinite(lon)){
+    alert("Localização do passageiro inválida.");
+    return;
+  }
+  destinoPassageiroCarro.lat = lat;
+  destinoPassageiroCarro.lon = lon;
+  const box = document.getElementById("navegacaoPassageiroCarro");
+  if(box) box.style.display = "block";
+}
+
+function irGoogleMapsPassageiro(){
+  const d = destinoPassageiroCarro;
+  if(d.lat === null || d.lon === null){
+    alert("A localização do passageiro ainda não foi carregada.");
+    return;
+  }
+  window.open("https://www.google.com/maps/dir/?api=1&destination="+encodeURIComponent(d.lat+","+d.lon), "_blank");
+}
+
+function irWazePassageiro(){
+  const d = destinoPassageiroCarro;
+  if(d.lat === null || d.lon === null){
+    alert("A localização do passageiro ainda não foi carregada.");
+    return;
+  }
+  window.open("https://www.waze.com/ul?ll="+encodeURIComponent(d.lat+","+d.lon)+"&navigate=yes", "_blank");
+}
+
+let online = false;
+let minhaLat = -16.6096;
+let minhaLon = -49.4948;
+
+function iniciarMapa(){
+
+  mapa = L.map("map", {
+    zoomControl:false,
+    attributionControl:true
+  }).setView([minhaLat,minhaLon],15);
+
+  L.tileLayer(
+    "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+    {
+      maxZoom:19,
+      attribution:"© OpenStreetMap"
+    }
+  ).addTo(mapa);
+
+  marcadorMotorista = L.circleMarker(
+    [minhaLat,minhaLon],
+    {
+      radius:8,
+      color:"#111",
+      weight:3,
+      fillColor:"#2563eb",
+      fillOpacity:1
+    }
+  ).addTo(mapa);
+
+  if(navigator.geolocation){
+
+    navigator.geolocation.getCurrentPosition(
+      function(pos){
+
+        minhaLat = pos.coords.latitude;
+        minhaLon = pos.coords.longitude;
+
+        marcadorMotorista.setLatLng([minhaLat,minhaLon]);
+        mapa.setView([minhaLat,minhaLon],16);
+
+      },
+      function(){
+        console.log("GPS não autorizado. Usando posição inicial.");
+      },
+      {
+        enableHighAccuracy:true,
+        timeout:10000,
+        maximumAge:10000
+      }
+    );
+
+  }
+}
+
+function centralizar(){
+
+  if(mapa && marcadorMotorista){
+    mapa.setView(marcadorMotorista.getLatLng(),16);
+  }
+}
+
+function abrirSaque(){
+  document.getElementById("modalSaque").style.display="block";
+}
+
+function fecharSaque(){
+  document.getElementById("modalSaque").style.display="none";
+}
+
+function calcularSaque(){
+  const valor=Number(document.getElementById("valorSaque").value||0);
+  const taxa=valor*0.05;
+  const liquido=valor-taxa;
+
+  document.getElementById("resumoSolicitado").textContent =
+    "R$ "+valor.toFixed(2).replace(".",",");
+
+  document.getElementById("resumoTaxa").textContent =
+    "R$ "+taxa.toFixed(2).replace(".",",");
+
+  document.getElementById("resumoLiquido").textContent =
+    "R$ "+liquido.toFixed(2).replace(".",",");
+}
+
+function confirmarSaque(){
+  const valor=Number(document.getElementById("valorSaque").value||0);
+
+  if(valor<=0){
+    alert("Informe o valor que deseja solicitar.");
+    return;
+  }
+
+  const taxa=valor*0.05;
+  const liquido=valor-taxa;
+
+  fetch("/api/motorista-carro/saque", {
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    credentials:"same-origin",
+    body:JSON.stringify({
+      valor:valor,
+
+    })
+  })
+  .then(async function(resposta){
+    const dados=await resposta.json().catch(function(){ return {}; });
+
+    if(!resposta.ok || !dados.ok){
+      throw new Error(dados.erro || "Não foi possível registrar o saque.");
+    }
+
+    alert(
+      "✅ Solicitação registrada!\n\n"+
+      "Valor solicitado: R$ "+valor.toFixed(2).replace(".",",")+"\n"+
+      "Taxa de 5%: R$ "+taxa.toFixed(2).replace(".",",")+"\n"+
+      "Valor líquido: R$ "+liquido.toFixed(2).replace(".",",")+"\n\n"+
+      "Status: PENDENTE"
+    );
+
+    fecharSaque();
+  })
+  .catch(function(erro){
+    alert("❌ "+erro.message);
+  });
+}
+
+let corridaCarroAtual = null;
+
+let timerContagemCarro = null;
+let corridaCarroChamandoId = null;
+
+let audioContextoCarro = null;
+
+function prepararSomChamadaCarro(){
+  try{
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if(!AudioCtx) return;
+
+    if(!audioContextoCarro){
+      audioContextoCarro = new AudioCtx();
+    }
+
+    if(audioContextoCarro.state === "suspended"){
+      audioContextoCarro.resume();
+    }
+  }catch(e){
+    console.log("Áudio não disponível:", e);
+  }
+}
+
+
+function falarChamadaCarro(){
+  try{
+    if(!("speechSynthesis" in window)) return;
+
+    window.speechSynthesis.cancel();
+
+    const fala = new SpeechSynthesisUtterance(
+      "VAI DE CARRO! Nova corrida!"
+    );
+
+    fala.lang = "pt-BR";
+    fala.rate = 0.9;
+    fala.pitch = 1.0;
+    fala.volume = 1.0;
+
+    window.speechSynthesis.speak(fala);
+  }catch(e){
+    console.log("Voz não disponível:", e);
+  }
+}
+
+function tocarSomChamadaCarro(){
+  try{
+    prepararSomChamadaCarro();
+    atualizarEstatisticasCarro();
+
+    if(!audioContextoCarro) return;
+
+    const agora = audioContextoCarro.currentTime;
+
+    [0, 0.22, 0.44].forEach(function(atraso){
+      const oscilador = audioContextoCarro.createOscillator();
+      const ganho = audioContextoCarro.createGain();
+
+      oscilador.type = "sine";
+      oscilador.frequency.value = 880;
+
+      ganho.gain.setValueAtTime(0.0001, agora + atraso);
+      ganho.gain.exponentialRampToValueAtTime(0.85, agora + atraso + 0.02);
+      ganho.gain.exponentialRampToValueAtTime(0.0001, agora + atraso + 0.16);
+
+      oscilador.connect(ganho);
+      ganho.connect(audioContextoCarro.destination);
+
+      oscilador.start(agora + atraso);
+      oscilador.stop(agora + atraso + 0.18);
+    });
+  }catch(e){
+    console.log("Erro no som da chamada:", e);
+  }
+}
+
+function tocarChamadaCarro(){
+  try{
+    tocarSomChamadaCarro();
+    falarChamadaCarro();
+
+    if(navigator.vibrate){
+      navigator.vibrate([300,150,300,150,500]);
+    }
+  }catch(e){}
+}
+
+function iniciarContagemCorridaCarro(id){
+  if(corridaCarroChamandoId === id) return;
+
+  if(timerContagemCarro){
+    clearInterval(timerContagemCarro);
+  }
+
+  corridaCarroChamandoId = id;
+
+  let segundos = 15;
+  const contador = document.getElementById("segundosCorridaCarro");
+
+  if(contador) contador.textContent = segundos;
+
+  tocarChamadaCarro();
+
+  timerContagemCarro = setInterval(function(){
+    segundos--;
+
+    if(contador) contador.textContent = segundos;
+
+    if(segundos <= 0){
+      clearInterval(timerContagemCarro);
+      timerContagemCarro = null;
+      corridaCarroChamandoId = null;
+
+      const card = document.getElementById("corridaCarroPendente");
+      if(card) card.style.display = "none";
+
+      const aviso = document.getElementById("contadorCorridaCarro");
+
+      if(aviso){
+        aviso.innerHTML = "⏰ CHAMADA EXPIRADA";
+        aviso.style.color = "#ef4444";
+      }
+
+      corridaCarroAtual = null;
+    }
+  }, 1000);
+}
+
+
+
+async function buscarCorridasCarro(){
+  if(!online) return;
+
+  try{
+    const resposta = await fetch("/api/motorista-carro/corridas-pendentes", {
+      credentials:"same-origin"
+    });
+
+    const dados = await resposta.json();
+
+    if(!dados.ok || !Array.isArray(dados.corridas)){
+      return;
+    }
+
+    const corrida = dados.corridas.length ? dados.corridas[0] : null;
+    const card = document.getElementById("corridaCarroPendente");
+    const detalhes = document.getElementById("corridaCarroDetalhes");
+
+    if(!corrida){
+      if(
+        corridaCarroAtual &&
+        ["ACEITA","CHEGOU","EM_ANDAMENTO"].includes(
+          String(corridaCarroAtual.status || "").toUpperCase()
+        )
+      ){
+        if(card) card.style.display = "none";
+        return;
+      }
+
+      corridaCarroAtual = null;
+      if(card) card.style.display = "none";
+      return;
+    }
+
+    const novaCorridaCarro = !corridaCarroAtual || corridaCarroAtual.id !== corrida.id;
+
+    corridaCarroAtual = corrida;
+
+    if(novaCorridaCarro){
+      iniciarContagemCorridaCarro(corrida.id);
+    }
+
+    if(detalhes){
+      detalhes.innerHTML =
+        "<b>📍 Origem:</b> " + (corrida.origem || "Não informada") +
+        "<br><b>🏁 Destino:</b> " + (corrida.destino || "Não informado") +
+        "<br><b>📏 Distância:</b> " + Number(corrida.distancia_km || 0).toFixed(2) + " km" +
+        "<br><b>💰 Valor:</b> R$ " + Number(corrida.valor || 0).toFixed(2).replace(".", ",") +
+        "<br><b>👨‍✈️ Motorista recebe:</b> R$ " +
+        Number(corrida.valor_motorista || 0).toFixed(2).replace(".", ",");
+    }
+
+    if(card) card.style.display = "block";
+
+  }catch(erro){
+    console.log("Erro ao buscar corrida de carro:", erro);
+  }
+}
+
+
+async function atualizarEstatisticasCarro(){
+  try{
+    const resposta = await fetch("/api/motorista-carro/estatisticas", {
+      credentials: "same-origin"
+    });
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      return;
+    }
+
+    const blocos = document.querySelectorAll(".stat");
+    if(blocos.length >= 3){
+      const corridaHoje = blocos[0].querySelector("b");
+      const ganhoHoje = blocos[1].querySelector("b");
+      const total = blocos[2].querySelector("b");
+
+      if(corridaHoje){
+        corridaHoje.textContent = String(dados.corridas_hoje || 0);
+      }
+
+      if(ganhoHoje){
+        const valorGanhosHoje =
+          "R$ " + Number(dados.ganhos_hoje || 0).toFixed(2).replace(".", ",");
+        ganhoHoje.textContent = valorGanhosHoje;
+
+        const saldoTopo = document.getElementById("saldoHojeTopo");
+        if(saldoTopo){
+          saldoTopo.textContent = valorGanhosHoje;
+        }
+      }
+
+      if(total){
+        total.textContent =
+          "R$ " + Number(dados.total || 0).toFixed(2).replace(".", ",");
+      }
+    }
+
+  }catch(erro){
+    console.log("Erro ao atualizar estatísticas do carro:", erro);
+  }
+}
+
+function alternarStatus(){
+
+  online = !online;
+
+  const pill = document.getElementById("statusPill");
+  const text = document.getElementById("statusText");
+  const action = document.getElementById("onlineAction");
+  const title = document.getElementById("sheetTitle");
+  const sub = document.getElementById("sheetSub");
+
+  if(online){
+
+    prepararSomChamadaCarro();
+
+    pill.classList.add("online");
+    text.textContent = "Online";
+    action.textContent = "FICAR OFFLINE";
+    action.style.background = "#333";
+
+    title.textContent = "Você está online";
+    sub.textContent = "Aguardando novas solicitações de corrida.";
+
+    buscarCorridasCarro();
+
+    if(window._timerCorridasCarro){
+      clearInterval(window._timerCorridasCarro);
+    }
+
+    if(window._timerEstatisticasCarro){
+      clearInterval(window._timerEstatisticasCarro);
+    }
+
+    window._timerEstatisticasCarro = setInterval(function(){
+      if(online){
+        atualizarEstatisticasCarro();
+      }
+    }, 5000);
+
+    window._timerCorridasCarro = setInterval(function(){
+      if(online){
+        buscarCorridasCarro();
+      }
+    }, 4000);
+
+    document.getElementById("estadoCorridasTitulo").textContent =
+      "Você está online";
+    document.getElementById("estadoCorridasTexto").textContent =
+      "Aguardando novas solicitações de corrida.";
+
+  }else{
+
+    if(window._timerCorridasCarro){
+      clearInterval(window._timerCorridasCarro);
+      window._timerCorridasCarro = null;
+    }
+
+    pill.classList.remove("online");
+    text.textContent = "Offline";
+    action.textContent = "FICAR ONLINE";
+    action.style.background = "#2563eb";
+
+    title.textContent = "Você está offline";
+    sub.textContent = "Fique online para receber novos pedidos.";
+
+    document.getElementById("estadoCorridasTitulo").textContent =
+      "Você está offline";
+    document.getElementById("estadoCorridasTexto").textContent =
+      "Ative o online para receber corridas.";
+
+  }
+}
+
+document.addEventListener("DOMContentLoaded", function(){
+  iniciarMapa();
+  atualizarEstatisticasCarro();
+
+  const navegacao = document.getElementById("navegacaoPassageiroCarro");
+  const cheguei = document.getElementById("acaoChegueiCarro");
+
+  if(navegacao) navegacao.style.display = "none";
+  if(cheguei) cheguei.style.display = "none";
+});
+</script>
+
+</body>
+</html>
