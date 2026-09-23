@@ -9027,11 +9027,27 @@ def api_motorista_carro_estatisticas():
             corridas_hoje += 1
             ganhos_hoje += valor_motorista
 
+    garantir_tabela_saques_carro()
+
+    conn = conectar()
+    saques = conn.execute("""
+        SELECT COALESCE(SUM(valor), 0) AS total
+        FROM saques_carro
+        WHERE motorista_carro_id=?
+          AND status IN ('PENDENTE','PAGO')
+    """, (mid,)).fetchone()
+    conn.close()
+
+    total_saques = float(saques["total"] or 0)
+    saldo_disponivel = max(total - total_saques, 0)
+
     return {
         "ok": True,
         "corridas_hoje": corridas_hoje,
         "ganhos_hoje": round(ganhos_hoje, 2),
-        "total": round(total, 2)
+        "total": round(total, 2),
+        "total_saques": round(total_saques, 2),
+        "saldo_disponivel": round(saldo_disponivel, 2)
     }
 
 

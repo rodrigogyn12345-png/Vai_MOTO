@@ -485,7 +485,7 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;fon
 
         <div style="background:#0d0d0d;border-radius:14px;padding:15px;margin:15px 0;">
           <div style="color:#999;font-size:12px;">SALDO DISPONÍVEL</div>
-          <div style="font-size:28px;font-weight:900;margin-top:5px;">R$ 500,00</div>
+          <div id="saldoDisponivelSaque" style="font-size:28px;font-weight:900;margin-top:5px;">R$ 0,00</div>
         </div>
 
         <label style="display:block;color:#aaa;font-size:13px;margin-bottom:6px;">
@@ -1259,6 +1259,8 @@ async function buscarCorridasCarro(){
 }
 
 
+let saldoDisponivelCarro = 0;
+
 async function atualizarEstatisticasCarro(){
   try{
     const resposta = await fetch("/api/motorista-carro/estatisticas", {
@@ -1269,6 +1271,14 @@ async function atualizarEstatisticasCarro(){
 
     if(!resposta.ok || !dados.ok){
       return;
+    }
+
+    saldoDisponivelCarro = Number(dados.saldo_disponivel || 0);
+
+    const saldoSaque = document.getElementById("saldoDisponivelSaque");
+    if(saldoSaque){
+      saldoSaque.textContent =
+        "R$ " + saldoDisponivelCarro.toFixed(2).replace(".", ",");
     }
 
     const blocos = document.querySelectorAll(".stat");
