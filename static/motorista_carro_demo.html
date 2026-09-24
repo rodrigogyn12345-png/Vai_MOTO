@@ -470,6 +470,13 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;fon
       <span id="estadoCorridasTexto">Ative o online para receber corridas.</span>
     </div>
 
+    <div id="historicoCarro" style="display:none;margin-top:14px;">
+      <div style="font-size:18px;font-weight:900;margin-bottom:10px;">
+        📋 Histórico de corridas
+      </div>
+      <div id="historicoCarroLista"></div>
+    </div>
+
     <button class="withdraw" onclick="abrirSaque()">
       💸 SOLICITAR SAQUE
     </button>
@@ -544,12 +551,12 @@ html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#050505;fon
       PEDIDOS
     </button>
 
-    <button class="nav-item">
+    <button class="nav-item" onclick="abrirHistoricoCarro(this)">
       <span class="ico">▤</span>
       HISTÓRICO
     </button>
 
-    <button class="nav-item">
+    <button class="nav-item" onclick="abrirGanhosCarro(this)">
       <span class="ico">💰</span>
       GANHOS
     </button>
@@ -1203,7 +1210,7 @@ async function buscarCorridasCarro(){
   if(!online) return;
 
   try{
-    const resposta = await fetch("/api/motorista-carro/corridas-pendentes", {
+    const resposta = await fetch("/api/motorista-carro/historico", {
       credentials:"same-origin"
     });
 
@@ -1311,6 +1318,148 @@ async function atualizarEstatisticasCarro(){
   }catch(erro){
     console.log("Erro ao atualizar estatísticas do carro:", erro);
   }
+}
+
+
+async function carregarHistoricoCarro(){
+  const area = document.getElementById("historicoCarro");
+  const lista = document.getElementById("historicoCarroLista");
+
+  if(area) area.style.display = "block";
+  if(lista){
+    lista.innerHTML =
+      '<div class="empty"><strong>Carregando histórico...</strong></div>';
+  }
+
+  try{
+    const resposta = await fetch("/api/motorista-carro/historico", {
+      credentials: "same-origin",
+      cache: "no-store"
+    });
+
+    const dados = await resposta.json();
+
+    if(!resposta.ok || !dados.ok){
+      throw new Error(dados.erro || "Não foi possível carregar o histórico.");
+    }
+
+    const corridas = dados.corridas || [];
+
+    if(!corridas.length){
+      if(lista){
+        lista.innerHTML =
+          '<div class="empty"><strong>Nenhuma corrida realizada ainda.</strong>' +
+          '<span>Suas corridas aparecerão aqui.</span></div>';
+      }
+      return;
+    }
+
+    if(lista){
+      lista.innerHTML = corridas.map(function(c){
+        const valor = Number(c.valor || 0)
+          .toFixed(2).replace(".", ",");
+
+        const ganho = Number(c.valor_motorista || 0)
+          .toFixed(2).replace(".", ",");
+
+        const distancia = Number(c.distancia_km || 0)
+          .toFixed(2).replace(".", ",");
+
+        const status = String(c.status || "").toUpperCase();
+
+        const data = c.concluido_em ||
+                     c.iniciado_em ||
+                     c.criado_em ||
+                     "";
+
+        return `
+          <div style="
+            background:#151515;
+            border:1px solid #292929;
+            border-radius:17px;
+            padding:15px;
+            margin-bottom:10px;
+          ">
+            <div style="
+              display:flex;
+              justify-content:space-between;
+              gap:10px;
+              align-items:center;
+            ">
+              <strong>🚗 Corrida #${c.id}</strong>
+              <span style="font-weight:900;color:#22c55e;">
+                R$ ${ganho}
+              </span>
+            </div>
+
+            <div style="margin-top:10px;color:#bbb;font-size:13px;line-height:1.6;">
+              📍 ${c.origem || "Origem não informada"}<br>
+              🏁 ${c.destino || "Destino não informado"}<br>
+              📏 ${distancia} km<br>
+              💰 Valor da corrida: R$ ${valor}<br>
+              💵 Seu ganho: R$ ${ganho}<br>
+              💳 Pagamento: ${c.pagamento || "Não informado"}<br>
+              📌 Status: ${status}<br>
+              📅 ${data}
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+  }catch(erro){
+    console.log("Erro no histórico do carro:", erro);
+
+    if(lista){
+      lista.innerHTML =
+        '<div class="empty">' +
+        '<strong>Não foi possível carregar o histórico.</strong>' +
+        '<span>Tente novamente em alguns segundos.</span>' +
+        '</div>';
+    }
+  }
+}
+
+async function abrirHistoricoCarro(btn){
+  document.querySelectorAll(".bottom-nav .nav-item").forEach(function(x){
+    x.classList.remove("active");
+  });
+  if(btn) btn.classList.add("active");
+
+  const titulo = document.getElementById("sheetTitle");
+  const sub = document.getElementById("sheetSub");
+
+  if(titulo) titulo.textContent = "Histórico de corridas";
+  if(sub) sub.textContent = "Confira suas corridas realizadas.";
+
+  await carregarHistoricoCarro();
+
+  const estado = document.getElementById("estadoCorridasTitulo");
+  const texto = document.getElementById("estadoCorridasTexto");
+
+  if(estado) estado.textContent = "Histórico";
+  if(texto) texto.textContent = "Suas corridas realizadas aparecerão aqui.";
+}
+
+async function abrirGanhosCarro(btn){
+  document.querySelectorAll(".bottom-nav .nav-item").forEach(function(x){
+    x.classList.remove("active");
+  });
+  if(btn) btn.classList.add("active");
+
+  const titulo = document.getElementById("sheetTitle");
+  const sub = document.getElementById("sheetSub");
+
+  if(titulo) titulo.textContent = "Meus ganhos";
+  if(sub) sub.textContent = "Acompanhe seus ganhos e saldo disponível.";
+
+  await atualizarEstatisticasCarro();
+
+  const estado = document.getElementById("estadoCorridasTitulo");
+  const texto = document.getElementById("estadoCorridasTexto");
+
+  if(estado) estado.textContent = "Ganhos";
+  if(texto) texto.textContent = "Ganhos atualizados com suas corridas concluídas.";
 }
 
 async function alternarStatus(){

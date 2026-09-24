@@ -19,7 +19,7 @@ app = Flask(__name__)
 app.secret_key = "VAI_DE_MOTO_CHAVE_TROCAR_DEPOIS"
 app.config['MAX_CONTENT_LENGTH'] = 80 * 1024 * 1024
 
-DB = "/var/data/vai_de_moto.db"
+DB = "/var/data/vai_de_moto.db" if os.path.isdir("/var/data") else "vai_de_moto_teste.db"
 
 # =========================================================
 # VAI_DE_CARRO — ARMAZENAMENTO SEPARADO
@@ -9006,6 +9006,47 @@ def api_motorista_carro_finalizar(id):
     salvar_corridas_carro()
 
     return {"ok": True, "corrida": corrida}
+
+
+
+@app.route("/api/motorista-carro/historico")
+def api_motorista_carro_historico():
+    motorista_carro = _motorista_carro_logado()
+    mid = motorista_carro["id"] if motorista_carro else None
+
+    if not mid:
+        return {"ok": False, "erro": "Não autenticado."}, 401
+
+    historico = []
+
+    for corrida in CORRIDAS_CARRO:
+        if corrida.get("motorista_id") != mid:
+            continue
+
+        historico.append({
+            "id": corrida.get("id"),
+            "origem": corrida.get("origem") or "",
+            "destino": corrida.get("destino") or "",
+            "valor": float(corrida.get("valor") or 0),
+            "valor_motorista": float(corrida.get("valor_motorista") or 0),
+            "distancia_km": float(corrida.get("distancia_km") or 0),
+            "status": corrida.get("status") or "",
+            "pagamento": corrida.get("pagamento") or "",
+            "criado_em": corrida.get("criado_em") or "",
+            "aceita_em": corrida.get("aceita_em") or "",
+            "iniciado_em": corrida.get("iniciado_em") or "",
+            "concluido_em": corrida.get("concluido_em") or ""
+        })
+
+    historico.sort(
+        key=lambda c: str(c.get("id") or ""),
+        reverse=True
+    )
+
+    return {
+        "ok": True,
+        "corridas": historico[:100]
+    }
 
 
 @app.route("/api/motorista-carro/estatisticas")
