@@ -1620,7 +1620,7 @@ def admin_notificacoes_motoristas():
         </div>
         """
 
-    html = f"""
+    pagina_html = f"""
     <div class="card">
         <h2>📣 Notificações para motoristas</h2>
         <p>Envie uma notificação Push para os motoristas aprovados e online que autorizaram notificações no VAI_DE_MOTO.</p>
@@ -1640,7 +1640,7 @@ def admin_notificacoes_motoristas():
     </div>
     <a class="btn btn-azul" href="/">⬅️ VOLTAR AO PAINEL</a>
     """
-    return pagina(html)
+    return pagina(pagina_html)
 
 
 @app.route("/motoqueiros", methods=["GET", "POST"])
