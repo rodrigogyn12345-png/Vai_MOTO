@@ -1470,6 +1470,11 @@ def dashboard():
         </a>
     </div>
 
+        <a class="btn btn-azul" href="/admin/notificacoes-motoristas">
+            🏍️ NOTIFICAR MOTORISTAS
+        </a>
+    </div>
+
     <div class="card">
         <h2>📡 Monitoramento</h2>
         <p>Acompanhe motoristas, GPS e corridas aceitas.</p>
@@ -1589,6 +1594,52 @@ def admin_notificacoes_passageiros():
     <a class="btn btn-azul" href="/">⬅️ VOLTAR AO PAINEL</a>
     '''
 
+    return pagina(html)
+
+
+@app.route("/admin/notificacoes-motoristas", methods=["GET", "POST"])
+@login_obrigatorio
+def admin_notificacoes_motoristas():
+    resultado = None
+
+    if request.method == "POST":
+        titulo = (request.form.get("titulo") or "").strip()
+        corpo = (request.form.get("corpo") or "").strip()
+
+        if not titulo or not corpo:
+            resultado = "Informe o título e a mensagem."
+        else:
+            enviar_push_motoristas_online(titulo, corpo)
+            resultado = "Push processado para os motoristas online que autorizaram as notificações."
+
+    aviso = ""
+    if resultado:
+        aviso = f"""
+        <div style="padding:15px;border-radius:12px;margin-bottom:18px;background:#f5f5f5;border-left:5px solid #111;">
+            <b>{html.escape(resultado)}</b>
+        </div>
+        """
+
+    html = f"""
+    <div class="card">
+        <h2>📣 Notificações para motoristas</h2>
+        <p>Envie uma notificação Push para os motoristas aprovados e online que autorizaram notificações no VAI_DE_MOTO.</p>
+        {aviso}
+        <form method="POST">
+            <label><b>Título</b></label>
+            <input name="titulo" maxlength="80" required placeholder="🏍️ VAI_DE_MOTO está online!"
+                   style="width:100%;padding:14px;margin:8px 0 15px;box-sizing:border-box;border-radius:10px;border:1px solid #ccc;">
+            <label><b>Mensagem</b></label>
+            <textarea name="corpo" maxlength="180" required rows="4" placeholder="🚨 Nova corrida disponível! Fique atento."
+                      style="width:100%;padding:14px;margin:8px 0 15px;box-sizing:border-box;border-radius:10px;border:1px solid #ccc;resize:vertical;"></textarea>
+            <button type="submit" class="btn btn-azul"
+                    onclick="return confirm('Enviar esta notificação para os motoristas online que ativaram o Push?')">
+                📣 ENVIAR PARA MOTORISTAS
+            </button>
+        </form>
+    </div>
+    <a class="btn btn-azul" href="/">⬅️ VOLTAR AO PAINEL</a>
+    """
     return pagina(html)
 
 
