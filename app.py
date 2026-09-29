@@ -1616,7 +1616,7 @@ def admin_notificacoes_motoristas():
     if resultado:
         aviso = f"""
         <div style="padding:15px;border-radius:12px;margin-bottom:18px;background:#f5f5f5;border-left:5px solid #111;">
-            <b>{html.escape(resultado)}</b>
+            <b>{resultado}</b>
         </div>
         """
 
