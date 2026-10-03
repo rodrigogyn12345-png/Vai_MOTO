@@ -1239,6 +1239,7 @@ window.addEventListener("load", function() {
     }
 });
 
+</script>
 
 <!-- ALERTA DE NOVA CORRIDA - ADMIN -->
 <div id="alertaNovaCorrida" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:18px 22px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35);width:min(92%,420px);text-align:center;">
