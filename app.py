@@ -1238,73 +1238,75 @@ window.addEventListener("load", function() {
             });
     }
 });
-/* ALERTA DE NOVA CORRIDA NO PAINEL ADMIN */
+
+
+<!-- ALERTA DE NOVA CORRIDA - ADMIN -->
 <div id="alertaNovaCorrida" style="display:none;position:fixed;top:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#dc2626;color:#fff;padding:18px 22px;border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35);width:min(92%,420px);text-align:center;">
   <div style="font-size:24px;font-weight:900;">🚨 NOVA CORRIDA!</div>
   <div id="textoNovaCorrida" style="margin:8px 0;font-size:16px;"></div>
-  <button onclick="window.abrirNovaCorrida()" style="background:#fff;color:#b91c1c;border:0;border-radius:10px;padding:12px 18px;font-weight:900;cursor:pointer;">👁️ VER CORRIDA</button>
-  <button onclick="window.fecharAlertaCorrida()" style="margin-left:6px;background:rgba(255,255,255,.2);color:#fff;border:1px solid #fff;border-radius:10px;padding:12px 14px;font-weight:700;cursor:pointer;">FECHAR</button>
+  <button onclick="window.abrirNovaCorrida()" style="background:#fff;color:#b91c1c;border:0;border-radius:10px;padding:12px 18px;font-weight:900;">👁️ VER CORRIDA</button>
+  <button onclick="window.fecharAlertaCorrida()" style="margin-left:6px;background:rgba(255,255,255,.2);color:#fff;border:1px solid #fff;border-radius:10px;padding:12px 14px;font-weight:700;">FECHAR</button>
 </div>
 
 <script>
 (function(){
-  let ultimaCorridaAdmin = Number(localStorage.getItem("vai_de_moto_ultima_corrida_admin") || 0);
-  let corridaAtualAdmin = null;
-  let audioAdmin = null;
+  let ultimaCorrida = Number(localStorage.getItem("vai_de_moto_ultima_corrida_admin") || 0);
+  let corridaAtual = null;
+  let audio = null;
 
-  function prepararSomAdmin(){
+  function prepararSom(){
     try{
-      const C = window.AudioContext || window.webkitAudioContext;
-      if(!C) return;
-      if(!audioAdmin) audioAdmin = new C();
-      if(audioAdmin.state === "suspended") audioAdmin.resume();
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if(!AudioCtx) return;
+      if(!audio) audio = new AudioCtx();
+      if(audio.state === "suspended") audio.resume();
     }catch(e){}
   }
 
-  function tocarAlertaAdmin(){
+  function tocarSom(){
     try{
-      prepararSomAdmin();
-      if(!audioAdmin) return;
+      prepararSom();
+      if(!audio) return;
 
-      const agora = audioAdmin.currentTime;
-      const oscilador = audioAdmin.createOscillator();
-      const ganho = audioAdmin.createGain();
+      const agora = audio.currentTime;
+      const osc = audio.createOscillator();
+      const ganho = audio.createGain();
 
-      oscilador.type = "sine";
-      oscilador.frequency.setValueAtTime(880, agora);
-      oscilador.frequency.setValueAtTime(1100, agora + .15);
-      oscilador.frequency.setValueAtTime(880, agora + .30);
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(880, agora);
+      osc.frequency.setValueAtTime(1100, agora + 0.15);
+      osc.frequency.setValueAtTime(880, agora + 0.30);
 
-      ganho.gain.setValueAtTime(.001, agora);
-      ganho.gain.exponentialRampToValueAtTime(.35, agora + .03);
-      ganho.gain.exponentialRampToValueAtTime(.001, agora + .55);
+      ganho.gain.setValueAtTime(0.001, agora);
+      ganho.gain.exponentialRampToValueAtTime(0.30, agora + 0.03);
+      ganho.gain.exponentialRampToValueAtTime(0.001, agora + 0.55);
 
-      oscilador.connect(ganho);
-      ganho.connect(audioAdmin.destination);
-      oscilador.start(agora);
-      oscilador.stop(agora + .6);
+      osc.connect(ganho);
+      ganho.connect(audio.destination);
+      osc.start(agora);
+      osc.stop(agora + 0.6);
     }catch(e){}
   }
 
-  window.addEventListener("click", prepararSomAdmin, {once:true});
-  window.addEventListener("touchstart", prepararSomAdmin, {once:true});
+  window.addEventListener("click", prepararSom, {once:true});
+  window.addEventListener("touchstart", prepararSom, {once:true});
 
   window.abrirNovaCorrida = function(){
-    if(corridaAtualAdmin){
-      window.location.href = "/corridas/" + corridaAtualAdmin.id;
+    if(corridaAtual){
+      window.location.href = "/corridas/" + corridaAtual.id;
     }
   };
 
   window.fecharAlertaCorrida = function(){
-    const el = document.getElementById("alertaNovaCorrida");
-    if(el) el.style.display = "none";
+    const alerta = document.getElementById("alertaNovaCorrida");
+    if(alerta) alerta.style.display = "none";
   };
 
-  async function verificarNovaCorridaAdmin(){
+  async function verificarNovaCorrida(){
     try{
       const resposta = await fetch("/api/admin/nova-corrida", {
-        cache:"no-store",
-        credentials:"same-origin"
+        cache: "no-store",
+        credentials: "same-origin"
       });
 
       if(!resposta.ok) return;
@@ -1314,17 +1316,17 @@ window.addEventListener("load", function() {
 
       const corrida = dados.corrida;
 
-      if(!ultimaCorridaAdmin){
-        ultimaCorridaAdmin = Number(corrida.id);
-        localStorage.setItem("vai_de_moto_ultima_corrida_admin", ultimaCorridaAdmin);
+      if(!ultimaCorrida){
+        ultimaCorrida = Number(corrida.id);
+        localStorage.setItem("vai_de_moto_ultima_corrida_admin", ultimaCorrida);
         return;
       }
 
-      if(Number(corrida.id) > ultimaCorridaAdmin){
-        ultimaCorridaAdmin = Number(corrida.id);
-        localStorage.setItem("vai_de_moto_ultima_corrida_admin", ultimaCorridaAdmin);
+      if(Number(corrida.id) > ultimaCorrida){
+        ultimaCorrida = Number(corrida.id);
+        localStorage.setItem("vai_de_moto_ultima_corrida_admin", ultimaCorrida);
 
-        corridaAtualAdmin = corrida;
+        corridaAtual = corrida;
 
         const texto = document.getElementById("textoNovaCorrida");
         const alerta = document.getElementById("alertaNovaCorrida");
@@ -1333,30 +1335,26 @@ window.addEventListener("load", function() {
           texto.innerHTML =
             "Corrida #" + corrida.id +
             "<br>💰 R$ " + Number(corrida.valor || 0).toFixed(2).replace(".", ",") +
-            "<br>📍 " + corrida.origem +
-            "<br>🏁 " + corrida.destino;
+            "<br>📍 " + (corrida.origem || "-") +
+            "<br>🏁 " + (corrida.destino || "-");
         }
 
         if(alerta) alerta.style.display = "block";
 
-        prepararSomAdmin();
-        tocarAlertaAdmin();
-
-        if("Notification" in window && Notification.permission === "granted"){
-          new Notification("🚨 NOVA CORRIDA — VAI_DE_MOTO", {
-            body:"Corrida #" + corrida.id + " — R$ " + Number(corrida.valor || 0).toFixed(2).replace(".", ",")
-          });
-        }
+        tocarSom();
       }
     }catch(e){
-      console.log("Alerta admin:", e);
+      console.log("Alerta de corrida:", e);
     }
   }
 
-  setTimeout(verificarNovaCorridaAdmin, 3000);
-  setInterval(verificarNovaCorridaAdmin, 5000);
+  window.addEventListener("load", function(){
+    setTimeout(verificarNovaCorrida, 3000);
+    setInterval(verificarNovaCorrida, 5000);
+  });
 })();
 </script>
+
 
 </body>
 </html>
