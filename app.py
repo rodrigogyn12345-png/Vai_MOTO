@@ -1264,6 +1264,19 @@ window.addEventListener("load", function() {
     }catch(e){}
   }
 
+  function falarNovaCorrida(){
+    try{
+      if(!window.speechSynthesis) return;
+      window.speechSynthesis.cancel();
+      const fala = new SpeechSynthesisUtterance("Atenção! Nova corrida disponível!");
+      fala.lang = "pt-BR";
+      fala.rate = 0.9;
+      fala.pitch = 1;
+      fala.volume = 1;
+      window.speechSynthesis.speak(fala);
+    }catch(e){}
+  }
+
   function tocarSom(){
     try{
       prepararSom();
@@ -1343,6 +1356,7 @@ window.addEventListener("load", function() {
         if(alerta) alerta.style.display = "block";
 
         tocarSom();
+        falarNovaCorrida();
       }
     }catch(e){
       console.log("Alerta de corrida:", e);
